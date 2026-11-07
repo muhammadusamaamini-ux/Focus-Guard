@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Focus Guard</string>
+    <string name="acc_desc">Focus Guard uses this to see which app or website is open, so it can block the ones you chose during your focus time. Nothing is collected or sent anywhere; it all stays on your phone.</string>
+</resources>
