@@ -92,7 +92,7 @@ public class BlockListActivity extends Activity {
     }
 
     private void applyLock() {
-        fullyLocked = Rules.focusOn(this) || Rules.sleepNow(this);
+        fullyLocked = Rules.focusActive(this) || Rules.sleepNow(this);
         Set<String> frozen = Rules.lockedApps(this);
         if (fullyLocked) {
             lockText.setText("🔒 Locked while focus time or bedtime is on.");
@@ -115,7 +115,7 @@ public class BlockListActivity extends Activity {
     }
 
     private void save() {
-        if (Rules.focusOn(this) || Rules.sleepNow(this)) return;
+        if (Rules.focusActive(this) || Rules.sleepNow(this)) return;
 
         Set<String> sites = new HashSet<>();
         for (String line : sitesInput.getText().toString().split("[\\n,\\s]+")) {

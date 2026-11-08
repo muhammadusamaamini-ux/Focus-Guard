@@ -43,10 +43,10 @@ public final class Notifier {
             b.setContentTitle("Emergency time")
                     .setContentText("Blocking comes back on automatically.");
             countdown(b, Prefs.getLong(c, "em_until"));
-        } else if (Rules.focusOn(c)) {
+        } else if (Rules.focusActive(c)) {
             b.setContentTitle("Focus is on")
                     .setContentText("Distracting apps and websites are blocked.");
-            countdown(b, Prefs.getEnd(c));
+            countdown(b, Rules.focusEndsAt(c));
         } else if (Rules.sleepNow(c)) {
             b.setContentTitle("Bedtime 🌙")
                     .setContentText("Distracting apps are blocked until "
@@ -83,7 +83,7 @@ public final class Notifier {
 
     private static String signature(Context c) {
         if (Rules.emergencyOn(c)) return "em" + Prefs.getLong(c, "em_until");
-        if (Rules.focusOn(c)) return "focus" + Prefs.getEnd(c);
+        if (Rules.focusActive(c)) return "focus" + Rules.focusEndsAt(c);
         if (Rules.sleepNow(c)) return "sleep" + Rules.sleepEndsAt(c);
         return "idle";
     }

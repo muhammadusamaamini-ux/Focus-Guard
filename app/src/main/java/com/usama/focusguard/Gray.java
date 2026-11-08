@@ -43,7 +43,7 @@ public final class Gray {
     /** Called every few seconds by the blocker: grayscale on or off as needed. */
     public static void apply(Context c) {
         if (!canControl(c)) return;
-        boolean want = (Rules.focusOn(c) && focusWanted(c)) || (Rules.sleepNow(c) && sleepWanted(c));
+        boolean want = (Rules.focusActive(c) && focusWanted(c)) || (Rules.sleepNow(c) && sleepWanted(c));
         boolean ours = Prefs.getBool(c, "gray_ours");
         ContentResolver r = c.getContentResolver();
         try {

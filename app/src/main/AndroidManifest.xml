@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Grayscale screen. Needs a one-time grant from a computer (adb) -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- Screen-time dashboard (you allow it in Settings > Usage access) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- Do Not Disturb at bedtime -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
     <!-- Lets the app see your installed apps so you can pick which to block -->
     <queries>
@@ -44,6 +48,10 @@
 
         <activity
             android:name=".PlanActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".AppDetailActivity"
             android:exported="false" />
 
         <activity

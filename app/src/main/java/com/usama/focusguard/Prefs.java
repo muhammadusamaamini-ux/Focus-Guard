@@ -108,6 +108,53 @@ public final class Prefs {
                 .putInt("sleep_end", end).commit();
     }
 
+    /** Days of week as bits: Sunday = bit 0 ... Saturday = bit 6. */
+    public static int sleepDays(Context c) { return sp(c).getInt("sleep_days", 127); }
+
+    public static void setSleepDays(Context c, int days) { sp(c).edit().putInt("sleep_days", days).commit(); }
+
+    // Scheduled focus (e.g. weekdays 9:00 - 13:00)
+    public static boolean schedOn(Context c) { return sp(c).getBoolean("sched_on", false); }
+
+    public static int schedStart(Context c) { return sp(c).getInt("sched_start", 9 * 60); }
+
+    public static int schedEnd(Context c) { return sp(c).getInt("sched_end", 13 * 60); }
+
+    public static int schedDays(Context c) { return sp(c).getInt("sched_days", 62); }
+
+    public static void setSchedule(Context c, boolean on, int start, int end, int days) {
+        sp(c).edit().putBoolean("sched_on", on).putInt("sched_start", start)
+                .putInt("sched_end", end).putInt("sched_days", days).commit();
+    }
+
+    private static final String[] DAY_SHORT = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+    /** 62 -> "Mon–Fri", 127 -> "Every day" */
+    public static String days(int mask) {
+        if (mask == 127) return "Every day";
+        if (mask == 62) return "Mon–Fri";
+        if (mask == 65) return "Sat & Sun";
+        if (mask == 0) return "No days";
+        StringBuilder sb = new StringBuilder();
+        for (int k = 1; k <= 7; k++) {
+            int d = k % 7;   // start the week on Monday
+            if ((mask & (1 << d)) != 0) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(DAY_SHORT[d]);
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 8100000 -> "2 h 15 min" */
+    public static String duration(long ms) {
+        long min = ms / 60_000L;
+        if (min < 1) return ms > 0 ? "< 1 min" : "0 min";
+        if (min < 60) return min + " min";
+        long h = min / 60, m = min % 60;
+        return m == 0 ? h + " h" : h + " h " + m + " min";
+    }
+
     // ---------- daily usage ----------
 
     public static String today() {

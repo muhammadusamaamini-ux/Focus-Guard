@@ -19,8 +19,8 @@ public class FocusTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
-        if (Rules.focusOn(this)) {
-            Rules.toast(this, "Focus is on · " + Prefs.format(Prefs.remaining(this)) + " left");
+        if (Rules.focusActive(this)) {
+            Rules.toast(this, "Focus is on · " + Prefs.format(Rules.focusLeft(this)) + " left");
             refresh();
             return;
         }
@@ -40,11 +40,11 @@ public class FocusTileService extends TileService {
     private void refresh() {
         Tile t = getQsTile();
         if (t == null) return;
-        boolean on = Rules.focusOn(this);
+        boolean on = Rules.focusActive(this);
         t.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         t.setLabel(on ? "Focus on" : "Focus");
         if (Build.VERSION.SDK_INT >= 29) {
-            long mins = (Prefs.remaining(this) + Rules.MIN - 1) / Rules.MIN;
+            long mins = (Rules.focusLeft(this) + Rules.MIN - 1) / Rules.MIN;
             t.setSubtitle(on ? mins + " min left" : "Tap to start");
         }
         t.updateTile();

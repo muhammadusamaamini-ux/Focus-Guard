@@ -139,7 +139,7 @@ public class BlockActivity extends Activity {
             icon.setText("🔒");
             title.setText("Stay focused");
             message.setText("This is blocked during your focus time.\nTime left:");
-            timer.setText(Prefs.format(Prefs.remaining(this)));
+            timer.setText(Prefs.format(Rules.focusLeft(this)));
         } else {
             icon.setText("🌙");
             title.setText("It's bedtime");

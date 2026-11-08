@@ -27,33 +27,65 @@ public final class Rules {
 
     public static long emPeriod(String mode) { return SLEEP.equals(mode) ? 60 * MIN : 20 * MIN; }
 
-    // ---------- focus & bedtime ----------
+    // ---------- time windows ----------
 
-    public static boolean focusOn(Context c) { return Prefs.remaining(c) > 0L; }
+    private static boolean dayOn(int days, int dow) { return (days & (1 << dow)) != 0; }
 
-    public static boolean sleepNow(Context c) {
-        if (!Prefs.sleepOn(c)) return false;
-        int s = Prefs.sleepStart(c), e = Prefs.sleepEnd(c);
-        if (s == e) return false;
+    /** Is "now" inside start..end (minutes of day) on one of the chosen days? Handles midnight. */
+    static boolean inWindow(int start, int end, int days) {
+        if (start == end) return false;
         Calendar cal = Calendar.getInstance();
         int m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
-        return s < e ? (m >= s && m < e) : (m >= s || m < e);
+        int dow = cal.get(Calendar.DAY_OF_WEEK) - 1;
+        if (start < end) return m >= start && m < end && dayOn(days, dow);
+        if (m >= start) return dayOn(days, dow);
+        if (m < end) return dayOn(days, (dow + 6) % 7);   // after midnight: counts for yesterday
+        return false;
     }
 
-    public static long sleepEndsAt(Context c) {
-        int e = Prefs.sleepEnd(c);
+    /** Next time the clock reaches the given minute of day. */
+    static long nextAt(int minuteOfDay) {
         Calendar cal = Calendar.getInstance();
-        cal.set(Calendar.HOUR_OF_DAY, e / 60);
-        cal.set(Calendar.MINUTE, e % 60);
+        cal.set(Calendar.HOUR_OF_DAY, minuteOfDay / 60);
+        cal.set(Calendar.MINUTE, minuteOfDay % 60);
         cal.set(Calendar.SECOND, 0);
         cal.set(Calendar.MILLISECOND, 0);
         if (cal.getTimeInMillis() <= System.currentTimeMillis()) cal.add(Calendar.DAY_OF_MONTH, 1);
         return cal.getTimeInMillis();
     }
 
+    // ---------- focus & bedtime ----------
+
+    /** A focus session started by hand (app, notification, tile or shortcut). */
+    public static boolean focusOn(Context c) { return Prefs.remaining(c) > 0L; }
+
+    /** Inside the scheduled focus hours from the weekly plan. */
+    public static boolean scheduleNow(Context c) {
+        return Prefs.schedOn(c) && inWindow(Prefs.schedStart(c), Prefs.schedEnd(c), Prefs.schedDays(c));
+    }
+
+    /** Focus blocking is on, from either a manual session or the schedule. */
+    public static boolean focusActive(Context c) { return focusOn(c) || scheduleNow(c); }
+
+    public static long focusEndsAt(Context c) {
+        long end = focusOn(c) ? Prefs.getEnd(c) : 0L;
+        if (scheduleNow(c)) end = Math.max(end, nextAt(Prefs.schedEnd(c)));
+        return end;
+    }
+
+    public static long focusLeft(Context c) {
+        return Math.max(0L, focusEndsAt(c) - System.currentTimeMillis());
+    }
+
+    public static boolean sleepNow(Context c) {
+        return Prefs.sleepOn(c) && inWindow(Prefs.sleepStart(c), Prefs.sleepEnd(c), Prefs.sleepDays(c));
+    }
+
+    public static long sleepEndsAt(Context c) { return nextAt(Prefs.sleepEnd(c)); }
+
     /** FOCUS, SLEEP, or null when nothing is blocking right now. */
     public static String mode(Context c) {
-        if (focusOn(c)) return FOCUS;
+        if (focusActive(c)) return FOCUS;
         if (sleepNow(c)) return SLEEP;
         return null;
     }
@@ -82,7 +114,7 @@ public final class Rules {
     // ---------- weekly plan ----------
 
     public static boolean hasPlan(Context c) {
-        return !Prefs.getLimits(c).isEmpty() || Prefs.sleepOn(c);
+        return !Prefs.getLimits(c).isEmpty() || Prefs.sleepOn(c) || Prefs.schedOn(c);
     }
 
     public static boolean planLocked(Context c) {
@@ -123,7 +155,7 @@ public final class Rules {
 
     /** While true, Focus Guard's own settings, Accessibility switch and uninstall are blocked. */
     public static boolean guardOn(Context c) {
-        return focusOn(c) || sleepNow(c) || planLocked(c);
+        return focusActive(c) || sleepNow(c) || planLocked(c);
     }
 
     // ---------- starting focus ----------
@@ -140,8 +172,8 @@ public final class Rules {
 
     /** Starts focus from anywhere (app, notification, tile, home-screen shortcut). */
     public static boolean startFocus(Context c, int minutes) {
-        if (focusOn(c)) {
-            toast(c, "Focus is already on · " + Prefs.format(Prefs.remaining(c)) + " left");
+        if (focusActive(c)) {
+            toast(c, "Focus is already on · " + Prefs.format(focusLeft(c)) + " left");
             return false;
         }
         if (!blockerOn(c)) {
