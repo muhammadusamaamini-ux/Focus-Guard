@@ -57,7 +57,7 @@ public class RingView extends View {
 
         long total = 0;
         for (long v : values) total += v;
-        arc.setColor(Color.parseColor("#E4E9E6"));
+        arc.setColor(Color.parseColor(Ui.TRACK));
         canvas.drawArc(oval, 0, 360, false, arc);
         if (total > 0) {
             float start = -90f;

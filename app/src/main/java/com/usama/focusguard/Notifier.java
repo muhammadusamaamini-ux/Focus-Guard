@@ -70,8 +70,11 @@ public final class Notifier {
         if (nm == null) return;
         ensureChannel(nm);
         Notification n = builder(c)
-                .setContentTitle("Your weekly plan has ended")
-                .setContentText("Open Focus Guard to keep the same limits or change them.")
+                .setContentTitle("Your week has ended")
+                .setContentText("Your limits are paused. Tap to keep last week's settings or set new ones.")
+                .setStyle(new Notification.BigTextStyle().bigText("Your app timers, bedtime and focus "
+                        + "schedule are paused. Tap to continue with last week's settings or set new "
+                        + "restrictions."))
                 .setAutoCancel(true)
                 .setContentIntent(openApp(c))
                 .build();
@@ -92,7 +95,7 @@ public final class Notifier {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(c, CHANNEL)
                 : new Notification.Builder(c).setPriority(Notification.PRIORITY_LOW);
-        return b.setSmallIcon(R.drawable.ic_tile).setColor(Color.parseColor(Ui.INK));
+        return b.setSmallIcon(R.drawable.ic_tile).setColor(Color.parseColor(Ui.DARK));
     }
 
     private static void countdown(Notification.Builder b, long when) {

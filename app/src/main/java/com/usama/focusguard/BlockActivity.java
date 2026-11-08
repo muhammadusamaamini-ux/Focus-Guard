@@ -39,17 +39,17 @@ public class BlockActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.parseColor(Ui.INK));
+        getWindow().setStatusBarColor(Color.parseColor(Ui.DARK));
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        col.setBackgroundColor(Color.parseColor(Ui.INK));
+        col.setBackgroundColor(Color.parseColor(Ui.DARK));
         int pad = Ui.dp(this, 32);
         col.setPadding(pad, pad, pad, pad);
 
         icon = centered(Ui.text(this, "🔒", 56, Ui.GOLD, false));
-        title = centered(Ui.text(this, "", 30, Ui.PAPER, true));
+        title = centered(Ui.text(this, "", 30, Ui.LIGHT, true));
         message = centered(Ui.text(this, "", 17, Ui.SOFT, false));
         timer = centered(Ui.text(this, "", 48, Ui.GOLD, true));
         timer.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);

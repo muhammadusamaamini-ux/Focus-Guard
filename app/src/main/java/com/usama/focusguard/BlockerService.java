@@ -128,7 +128,7 @@ public class BlockerService extends AccessibilityService {
         if (screenOn) {
             String pkg = activePackage();
             if (pkg != null) {
-                Integer lim = Prefs.getLimits(this).get(pkg);
+                Integer lim = Rules.activeLimits(this).get(pkg);
                 if (lim != null && delta > 0) {
                     long used = Prefs.addUsage(this, pkg, delta);
                     warnIfNearLimit(pkg, used, lim);
@@ -183,7 +183,7 @@ public class BlockerService extends AccessibilityService {
         if (ignored.contains(pkg)) return;
 
         // 2. Daily limits (always on, emergencies don't apply).
-        Integer lim = Prefs.getLimits(this).get(pkg);
+        Integer lim = Rules.activeLimits(this).get(pkg);
         if (lim != null && Prefs.getUsage(this, pkg) >= lim * Rules.MIN) {
             block("limit", pkg, false);
             return;

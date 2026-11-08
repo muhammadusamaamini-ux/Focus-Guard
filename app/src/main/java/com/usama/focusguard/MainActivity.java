@@ -44,10 +44,7 @@ public class MainActivity extends Activity {
     private static final String NOTIF_PERM = "android.permission.POST_NOTIFICATIONS";
     private static final String[] TAB_NAMES = {"Dashboard", "Focus", "Limits", "Settings"};
     private static final String[] TAB_ICONS = {"📊", "🎯", "⏳", "⚙️"};
-    private static final int[] RING_COLORS = {
-            Color.parseColor("#1F3A33"), Color.parseColor("#F2C14E"), Color.parseColor("#5E9C8A"),
-            Color.parseColor("#D9825B"), Color.parseColor("#8C7AA9"), Color.parseColor("#C9D6CF")
-    };
+    private int[] RING_COLORS;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Button> chips = new ArrayList<>();
@@ -107,8 +104,14 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Ui.applyTheme(this);
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.parseColor(Ui.INK));
+        RING_COLORS = new int[]{
+                Color.parseColor(Ui.dark ? "#7FC7B0" : "#1F3A33"), Color.parseColor("#F2C14E"),
+                Color.parseColor("#5E9C8A"), Color.parseColor("#D9825B"), Color.parseColor("#8C7AA9"),
+                Color.parseColor(Ui.dark ? "#5A6B65" : "#C9D6CF")
+        };
+        getWindow().setStatusBarColor(Color.parseColor(Ui.dark ? Ui.PAPER : Ui.DARK));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -153,7 +156,7 @@ public class MainActivity extends Activity {
     private LinearLayout buildNav() {
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setBackgroundColor(Color.WHITE);
+        nav.setBackgroundColor(Color.parseColor(Ui.CARD));
         nav.setElevation(Ui.dp(this, 8));
         nav.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 8));
         for (int i = 0; i < 4; i++) {
@@ -349,7 +352,7 @@ public class MainActivity extends Activity {
                     Ui.top(this, 6));
         }
         long max = sorted.isEmpty() ? 1 : Math.max(1, sorted.get(0).getValue());
-        Map<String, Integer> limits = Prefs.getLimits(this);
+        Map<String, Integer> limits = Rules.activeLimits(this);
         for (Map.Entry<String, Long> e : sorted) {
             appList.addView(appRow(e.getKey(), e.getValue(), max, limits.get(e.getKey())));
         }
@@ -389,7 +392,7 @@ public class MainActivity extends Activity {
         mid.addView(top);
 
         LinearLayout track = new LinearLayout(this);
-        track.setBackground(Ui.round(this, "#E4E9E6", 4));
+        track.setBackground(Ui.round(this, Ui.TRACK, 4));
         View fill = new View(this);
         fill.setBackground(Ui.round(this, "#5E9C8A", 4));
         float frac = Math.max(0.02f, ms / (float) max);
@@ -413,8 +416,8 @@ public class MainActivity extends Activity {
     private void buildFocus(LinearLayout col) {
         col.addView(Ui.text(this, "Focus", 28, Ui.INK, true));
 
-        LinearLayout statusCard = Ui.card(this, Ui.INK);
-        status = Ui.text(this, "", 20, Ui.PAPER, true);
+        LinearLayout statusCard = Ui.card(this, Ui.DARK);
+        status = Ui.text(this, "", 20, Ui.LIGHT, true);
         statusSub = Ui.text(this, "", 14, Ui.SOFT, false);
         statusCard.addView(status);
         statusCard.addView(statusSub, Ui.top(this, 4));
@@ -530,6 +533,30 @@ public class MainActivity extends Activity {
         }
     }
 
+    private AlertDialog weekDialog;
+
+    /** Shown whenever the app is opened after the week has ended, until you choose. */
+    private void askAboutNewWeek() {
+        if (!Rules.weekOver(this) || (weekDialog != null && weekDialog.isShowing())) return;
+        weekDialog = new AlertDialog.Builder(this)
+                .setTitle("Your week has ended")
+                .setMessage("Your app timers, bedtime and focus schedule are paused. Do you want to continue "
+                        + "with last week's settings, or set new restrictions for this week?")
+                .setPositiveButton("Keep previous", (d, w) -> keepPreviousWeek())
+                .setNegativeButton("Set new", (d, w) -> startActivity(new Intent(this, PlanActivity.class)))
+                .setNeutralButton("Later", null)
+                .show();
+    }
+
+    private void keepPreviousWeek() {
+        Rules.lockPlan(this);
+        Notifier.update(this, true);
+        Rules.toast(this, "Last week's settings are locked in until "
+                + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock")) + ".");
+        refreshPlan();
+        refreshStatus();
+    }
+
     private void confirmStart() {
         if (Rules.focusActive(this)) return;
         int minutes;
@@ -567,18 +594,14 @@ public class MainActivity extends Activity {
                 Ui.MUTED, false), Ui.top(this, 2));
 
         weekCard = Ui.card(this, Ui.WARN);
-        weekCard.addView(Ui.text(this, "Your plan's week is over", 16, Ui.INK, true));
-        weekCard.addView(Ui.text(this, "Keep the same plan for another 7 days, or change it now. "
-                + "Until you choose, your current plan stays on.", 14, Ui.INK, false), Ui.top(this, 6));
+        weekCard.addView(Ui.text(this, "Your week has ended", 16, Ui.INK, true));
+        weekCard.addView(Ui.text(this, "Your app timers, bedtime and focus schedule are paused. Do you want "
+                + "to continue with last week's settings, or set new restrictions for this week?",
+                14, Ui.INK, false), Ui.top(this, 6));
         LinearLayout weekRow = Ui.row(this);
-        Button keep = Ui.button(this, "Keep for 7 days", false);
-        keep.setOnClickListener(v -> {
-            Rules.lockPlan(this);
-            Rules.toast(this, "Same plan locked for another 7 days.");
-            refreshPlan();
-            refreshStatus();
-        });
-        Button change = Ui.button(this, "Change it", false);
+        Button keep = Ui.button(this, "Keep previous", false);
+        keep.setOnClickListener(v -> keepPreviousWeek());
+        Button change = Ui.button(this, "Set new", false);
         change.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
         weekRow.addView(keep, Ui.weight(this, 1f, 0));
         weekRow.addView(change, Ui.weight(this, 1f, 8));
@@ -604,7 +627,8 @@ public class MainActivity extends Activity {
         } else {
             lockCard.addView(Ui.text(this, locked
                     ? "🔒 Locked until " + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock"))
-                    : "🔓 Unlocked: you can change it now", 15, Ui.INK, true));
+                    : "⏸ Paused: last week's plan is shown below. Keep it or set a new one.",
+                    15, Ui.INK, true));
         }
         Button open = Ui.button(this, !Rules.hasPlan(this) ? "Set up plan" : locked ? "View plan" : "Edit plan", false);
         open.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
@@ -626,11 +650,12 @@ public class MainActivity extends Activity {
             r.setOrientation(LinearLayout.VERTICAL);
             LinearLayout top = Ui.row(this);
             top.addView(Ui.text(this, Apps.label(this, e.getKey()), 15, Ui.INK, false), Ui.weight(this, 1f, 0));
-            top.addView(Ui.text(this, done ? "Time's up" : Prefs.duration(lim - used) + " left",
-                    14, done ? Ui.RED : Ui.MUTED, done));
+            top.addView(Ui.text(this, !locked ? e.getValue() + " min · paused"
+                            : done ? "Time's up" : Prefs.duration(lim - used) + " left",
+                    14, done && locked ? Ui.RED : Ui.MUTED, done && locked));
             r.addView(top);
             LinearLayout track = new LinearLayout(this);
-            track.setBackground(Ui.round(this, "#E4E9E6", 4));
+            track.setBackground(Ui.round(this, Ui.TRACK, 4));
             float frac = Math.min(1f, Math.max(0.02f, used / (float) lim));
             View fill = new View(this);
             fill.setBackground(Ui.round(this, done ? Ui.RED : Ui.GOLD, 4));
@@ -677,6 +702,23 @@ public class MainActivity extends Activity {
 
     private void refreshSettings() {
         settingsBody.removeAllViews();
+
+        LinearLayout look = Ui.card(this, Ui.CARD);
+        look.addView(Ui.text(this, "Appearance", 17, Ui.INK, true));
+        LinearLayout themeRow = Ui.row(this);
+        String[] names = {"Phone setting", "Light", "Dark"};
+        for (int i = 0; i < 3; i++) {
+            final int choice = i;
+            Button b = Ui.chip(this, names[i]);
+            Ui.setChip(this, b, Ui.themeChoice(this) == i);
+            b.setOnClickListener(v -> {
+                Prefs.sp(this).edit().putInt("theme", choice).commit();
+                recreate();
+            });
+            themeRow.addView(b, Ui.weight(this, 1f, i == 0 ? 0 : 6));
+        }
+        look.addView(themeRow, Ui.top(this, 10));
+        settingsBody.addView(look, Ui.top(this, 12));
 
         LinearLayout perms = Ui.card(this, Ui.CARD);
         perms.addView(Ui.text(this, "Permissions", 17, Ui.INK, true));
@@ -765,6 +807,7 @@ public class MainActivity extends Activity {
         refreshSettings();
         refreshStatus();
         if (tab == 0) loadDashboard();
+        askAboutNewWeek();
         handler.removeCallbacks(tick);
         handler.postDelayed(tick, 1000L);
     }

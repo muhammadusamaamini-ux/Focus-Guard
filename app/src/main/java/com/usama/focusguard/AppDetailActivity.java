@@ -30,6 +30,7 @@ public class AppDetailActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Ui.applyTheme(this);
         super.onCreate(savedInstanceState);
         pkg = getIntent().getStringExtra("pkg");
         if (pkg == null) {

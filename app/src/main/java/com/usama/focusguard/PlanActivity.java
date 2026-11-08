@@ -53,6 +53,7 @@ public class PlanActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Ui.applyTheme(this);
         super.onCreate(savedInstanceState);
         limits.putAll(Prefs.getLimits(this));
         locked = Rules.planLocked(this);

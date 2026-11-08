@@ -33,6 +33,7 @@ public class BlockListActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Ui.applyTheme(this);
         super.onCreate(savedInstanceState);
         LinearLayout col = Ui.page(this);
 

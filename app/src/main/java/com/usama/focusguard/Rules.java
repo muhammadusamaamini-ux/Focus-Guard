@@ -61,7 +61,8 @@ public final class Rules {
 
     /** Inside the scheduled focus hours from the weekly plan. */
     public static boolean scheduleNow(Context c) {
-        return Prefs.schedOn(c) && inWindow(Prefs.schedStart(c), Prefs.schedEnd(c), Prefs.schedDays(c));
+        return Prefs.schedOn(c) && planLocked(c)
+                && inWindow(Prefs.schedStart(c), Prefs.schedEnd(c), Prefs.schedDays(c));
     }
 
     /** Focus blocking is on, from either a manual session or the schedule. */
@@ -78,7 +79,16 @@ public final class Rules {
     }
 
     public static boolean sleepNow(Context c) {
-        return Prefs.sleepOn(c) && inWindow(Prefs.sleepStart(c), Prefs.sleepEnd(c), Prefs.sleepDays(c));
+        return Prefs.sleepOn(c) && planLocked(c)
+                && inWindow(Prefs.sleepStart(c), Prefs.sleepEnd(c), Prefs.sleepDays(c));
+    }
+
+    /**
+     * App timers in force right now. The plan only applies during its locked week: when the week
+     * ends, everything pauses until you choose to keep last week's settings or set new ones.
+     */
+    public static java.util.Map<String, Integer> activeLimits(Context c) {
+        return planLocked(c) ? Prefs.getLimits(c) : new java.util.TreeMap<>();
     }
 
     public static long sleepEndsAt(Context c) { return nextAt(Prefs.sleepEnd(c)); }

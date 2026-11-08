@@ -18,14 +18,57 @@ public final class Ui {
 
     private Ui() {}
 
-    public static final String INK = "#1F3A33";
-    public static final String PAPER = "#F6F4EF";
+    // Fixed colours (same in light and dark)
+    public static final String DARK = "#1F3A33";
+    public static final String LIGHT = "#F6F4EF";
     public static final String GOLD = "#F2C14E";
-    public static final String MUTED = "#5E6B66";
-    public static final String CARD = "#FFFFFF";
-    public static final String WARN = "#FBE7B5";
-    public static final String RED = "#B3261E";
     public static final String SOFT = "#C9D6CF";
+
+    // Theme colours (set by applyTheme)
+    public static String INK = "#1F3A33";     // main text
+    public static String PAPER = "#F6F4EF";   // page background
+    public static String MUTED = "#5E6B66";   // secondary text
+    public static String CARD = "#FFFFFF";    // card background
+    public static String WARN = "#FBE7B5";    // warning card
+    public static String RED = "#B3261E";
+    public static String TRACK = "#E4E9E6";   // empty part of bars and rings
+    public static boolean dark;
+
+    /** 0 = follow phone, 1 = light, 2 = dark */
+    public static int themeChoice(Context c) { return Prefs.sp(c).getInt("theme", 0); }
+
+    public static boolean isDark(Context c) {
+        int t = themeChoice(c);
+        if (t == 1) return false;
+        if (t == 2) return true;
+        int night = c.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        return night == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    /** Call at the very start of onCreate, before super.onCreate. */
+    public static void applyTheme(Activity a) {
+        dark = isDark(a);
+        if (dark) {
+            INK = "#E8EFEB";
+            PAPER = "#111816";
+            MUTED = "#9FB0A9";
+            CARD = "#1C2623";
+            WARN = "#4A3E1E";
+            RED = "#F2867B";
+            TRACK = "#2E3A36";
+            a.setTheme(android.R.style.Theme_Material_NoActionBar);
+        } else {
+            INK = "#1F3A33";
+            PAPER = "#F6F4EF";
+            MUTED = "#5E6B66";
+            CARD = "#FFFFFF";
+            WARN = "#FBE7B5";
+            RED = "#B3261E";
+            TRACK = "#E4E9E6";
+            a.setTheme(android.R.style.Theme_Material_Light_NoActionBar);
+        }
+    }
 
     public static int dp(Context c, int v) {
         return Math.round(v * c.getResources().getDisplayMetrics().density);
@@ -33,7 +76,7 @@ public final class Ui {
 
     /** Creates a scrolling page, shows it, and returns the column to add views to. */
     public static LinearLayout page(Activity a) {
-        a.getWindow().setStatusBarColor(Color.parseColor(INK));
+        a.getWindow().setStatusBarColor(Color.parseColor(dark ? PAPER : DARK));
         ScrollView scroll = new ScrollView(a);
         scroll.setBackgroundColor(Color.parseColor(PAPER));
         scroll.setFillViewport(true);
@@ -61,8 +104,8 @@ public final class Ui {
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, primary ? 18 : 15);
         b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        b.setTextColor(Color.parseColor(primary ? INK : PAPER));
-        b.setBackground(round(c, primary ? GOLD : INK, primary ? 26 : 12));
+        b.setTextColor(Color.parseColor(primary ? DARK : LIGHT));
+        b.setBackground(round(c, primary ? GOLD : (dark ? "#2E5248" : DARK), primary ? 26 : 12));
         b.setPadding(dp(c, 14), dp(c, primary ? 14 : 10), dp(c, 14), dp(c, primary ? 14 : 10));
         b.setStateListAnimator(null);
         return b;
@@ -85,7 +128,7 @@ public final class Ui {
 
     public static void setChip(Context c, Button b, boolean on) {
         b.setBackground(round(c, on ? GOLD : PAPER, 20));
-        b.setTextColor(Color.parseColor(INK));
+        b.setTextColor(Color.parseColor(on ? DARK : INK));
         b.setTypeface(Typeface.DEFAULT, on ? Typeface.BOLD : Typeface.NORMAL);
     }
 
