@@ -10,8 +10,10 @@ android {
         applicationId 'com.usama.focusguard'
         minSdk 24
         targetSdk 34
-        versionCode 2
-        versionName '2.0'
+        // GitHub passes its build number here, so "Check for updates" can compare versions.
+        def buildNumber = (project.findProperty('buildNumber') ?: '1').toString().toInteger()
+        versionCode buildNumber
+        versionName "build " + buildNumber
     }
 
     // Fixed signing key, so every new build installs over the old one.

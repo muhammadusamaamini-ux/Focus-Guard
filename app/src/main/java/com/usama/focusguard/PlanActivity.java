@@ -26,6 +26,8 @@ public class PlanActivity extends Activity {
     private int sleepEnd;
     private boolean locked;
 
+    private boolean graySleep;
+    private Switch graySwitch;
     private Switch sleepSwitch;
     private Button fromBtn;
     private Button toBtn;
@@ -78,6 +80,14 @@ public class PlanActivity extends Activity {
         times.addView(fromBtn, Ui.weight(this, 1f, 0));
         times.addView(toBtn, Ui.weight(this, 1f, 8));
         bedCard.addView(times, Ui.top(this, 10));
+        graySleep = Gray.sleepWanted(this);
+        graySwitch = new Switch(this);
+        graySwitch.setText("Grayscale screen at bedtime");
+        graySwitch.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        graySwitch.setTextColor(android.graphics.Color.parseColor(Ui.INK));
+        graySwitch.setChecked(graySleep);
+        graySwitch.setOnCheckedChangeListener((b, on) -> graySleep = on);
+        bedCard.addView(graySwitch, Ui.top(this, 12));
         col.addView(bedCard, Ui.top(this, 12));
 
         // --- Daily limits ---
@@ -110,6 +120,7 @@ public class PlanActivity extends Activity {
         toBtn.setText("Until " + Prefs.clock(this, sleepEnd));
         Ui.enable(fromBtn, sleepOn && !locked);
         Ui.enable(toBtn, sleepOn && !locked);
+        if (graySwitch != null) Ui.enable(graySwitch, sleepOn && !locked);
     }
 
     private void pickTime(boolean start) {
@@ -238,6 +249,7 @@ public class PlanActivity extends Activity {
                         + "limits or your bedtime, remove apps from your distracting list, or switch "
                         + "Focus Guard off. After that, you can keep the plan or change it.")
                 .setPositiveButton("Lock it", (d, w) -> {
+                    Prefs.putBool(this, "gray_sleep", graySleep);
                     Prefs.setLimits(this, limits);
                     Prefs.setSleep(this, sleepOn, sleepStart, sleepEnd);
                     Rules.lockPlan(this);

@@ -24,7 +24,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build the APK
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleRelease --no-daemon -PbuildNumber=${{ github.run_number }}
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk FocusGuard.apk

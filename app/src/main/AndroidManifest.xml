@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only used when you tap "Check for updates", to reach your own GitHub repository -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Grayscale screen. Needs a one-time grant from a computer (adb) -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <!-- Lets the app see your installed apps so you can pick which to block -->
     <queries>
@@ -58,6 +63,10 @@
 
         <receiver
             android:name=".ActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".InstallReceiver"
             android:exported="false" />
 
         <service

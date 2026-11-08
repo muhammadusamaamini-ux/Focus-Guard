@@ -20,7 +20,11 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.Switch;
 import android.widget.TextView;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.graphics.Typeface;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +47,8 @@ public class MainActivity extends Activity {
     private EditText minutesInput;
     private Button startBtn;
     private TextView listSummary;
+    private Switch grayFocus;
+    private LinearLayout grayCard;
     private int ticks;
 
     private final Runnable tick = new Runnable() {
@@ -129,7 +135,38 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         startRow.addView(startBtn, Ui.weight(this, 1f, 12));
         focusCard.addView(startRow, Ui.top(this, 12));
+
+        grayFocus = new Switch(this);
+        grayFocus.setText("Grayscale screen during focus");
+        grayFocus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        grayFocus.setTextColor(Color.parseColor(Ui.INK));
+        grayFocus.setChecked(Gray.focusWanted(this));
+        grayFocus.setOnCheckedChangeListener((b, on) -> {
+            Prefs.putBool(this, "gray_focus", on);
+            refreshStatus();
+        });
+        focusCard.addView(grayFocus, Ui.top(this, 12));
         col.addView(focusCard, Ui.top(this, 12));
+
+        // --- One-time grayscale setup ---
+        grayCard = Ui.card(this, Ui.WARN);
+        grayCard.addView(Ui.text(this, "One-time setup for grayscale", 16, Ui.INK, true));
+        grayCard.addView(Ui.text(this, "Android only lets an app turn the screen gray after you allow it "
+                + "once from a computer, using this command:", 14, Ui.INK, false), Ui.top(this, 6));
+        TextView cmd = Ui.text(this, Gray.GRANT_COMMAND, 13, Ui.INK, false);
+        cmd.setTypeface(Typeface.MONOSPACE);
+        cmd.setTextIsSelectable(true);
+        cmd.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
+        cmd.setBackground(Ui.round(this, Ui.PAPER, 8));
+        grayCard.addView(cmd, Ui.top(this, 8));
+        Button copy = Ui.button(this, "Copy command", false);
+        copy.setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("command", Gray.GRANT_COMMAND));
+            Rules.toast(this, "Command copied.");
+        });
+        grayCard.addView(copy, Ui.top(this, 10));
+        col.addView(grayCard, Ui.top(this, 12));
 
         // --- Week over ---
         weekCard = Ui.card(this, Ui.WARN);
@@ -182,6 +219,16 @@ public class MainActivity extends Activity {
                         + "• Home screen: long-press the Focus Guard icon and pick a time.",
                 14, Ui.INK, false), Ui.top(this, 6));
         col.addView(tips, Ui.top(this, 12));
+
+        // --- Updates ---
+        LinearLayout upd = Ui.card(this, Ui.CARD);
+        upd.addView(Ui.text(this, "App updates", 17, Ui.INK, true));
+        upd.addView(Ui.text(this, "Installed: build " + Updater.installedBuild(this), 14, Ui.MUTED, false),
+                Ui.top(this, 2));
+        Button check = Ui.button(this, "Check for updates", false);
+        check.setOnClickListener(v -> Updater.check(this));
+        upd.addView(check, Ui.top(this, 12));
+        col.addView(upd, Ui.top(this, 12));
     }
 
     @Override
@@ -241,6 +288,8 @@ public class MainActivity extends Activity {
         Ui.enable(startBtn, !focus);
         Ui.enable(minutesInput, !focus);
         for (Button b : chips) Ui.enable(b, !focus);
+        Ui.enable(grayFocus, !focus);
+        grayCard.setVisibility(Gray.anyWanted(this) && !Gray.canControl(this) ? View.VISIBLE : View.GONE);
         highlightChips();
 
         int apps = Rules.blockedApps(this).size();

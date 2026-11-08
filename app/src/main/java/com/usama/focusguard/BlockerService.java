@@ -138,6 +138,7 @@ public class BlockerService extends AccessibilityService {
         }
 
         Notifier.update(this);
+        Gray.apply(this);
         if (Rules.weekOver(this)) {
             long lock = Prefs.getLong(this, "plan_lock");
             if (Prefs.getLong(this, "week_notified") != lock) {
