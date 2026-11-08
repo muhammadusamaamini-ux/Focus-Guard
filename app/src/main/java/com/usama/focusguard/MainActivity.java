@@ -2,219 +2,301 @@ package com.usama.focusguard;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
+import java.util.Map;
 
 public class MainActivity extends Activity {
 
-    private static final String INK = "#1F3A33";
-    private static final String PAPER = "#F6F4EF";
-    private static final String GOLD = "#F2C14E";
-    private static final String MUTED = "#5E6B66";
+    private static final int[] PRESETS = {25, 30, 45, 60, 90};
+    private static final String NOTIF_PERM = "android.permission.POST_NOTIFICATIONS";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final List<CheckBox> appChecks = new ArrayList<>();
-    private final List<View> lockables = new ArrayList<>();
+    private final List<Button> chips = new ArrayList<>();
 
-    private TextView status;
     private LinearLayout accCard;
+    private LinearLayout notifCard;
+    private LinearLayout weekCard;
+    private LinearLayout planBody;
+    private TextView status;
+    private TextView statusSub;
     private EditText minutesInput;
-    private EditText sitesInput;
-    private LinearLayout appsBox;
-    private TextView appsLoading;
     private Button startBtn;
+    private TextView listSummary;
+    private int ticks;
 
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            refreshUi();
-            if (Prefs.isActive(MainActivity.this)) handler.postDelayed(this, 1000L);
+            refreshStatus();
+            if (++ticks % 15 == 0) refreshPlan();
+            handler.postDelayed(this, 1000L);
         }
     };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.parseColor(INK));
+        LinearLayout col = Ui.page(this);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor(PAPER));
-        scroll.setFillViewport(true);
+        col.addView(Ui.text(this, "Focus Guard", 30, Ui.INK, true));
+        col.addView(Ui.text(this, "Block distractions while you study.", 15, Ui.MUTED, false),
+                Ui.top(this, 2));
 
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(20), dp(24), dp(20), dp(40));
-        scroll.addView(col);
-
-        // Header
-        TextView title = label("Focus Guard", 30, INK, true);
-        col.addView(title);
-        col.addView(label("Block distracting apps and websites while you study.", 15, MUTED, false),
-                margins(dp(4)));
-
-        // Status card
-        status = label("", 18, PAPER, true);
-        status.setPadding(dp(18), dp(18), dp(18), dp(18));
-        status.setBackground(round(INK, 18));
-        col.addView(status, margins(dp(20)));
-
-        // Accessibility warning card
-        accCard = new LinearLayout(this);
-        accCard.setOrientation(LinearLayout.VERTICAL);
-        accCard.setPadding(dp(16), dp(16), dp(16), dp(16));
-        accCard.setBackground(round("#FBE7B5", 16));
-        accCard.addView(label("The blocker is switched off", 16, INK, true));
-        accCard.addView(label("Turn on \"Focus Guard\" in Accessibility settings so it can block apps and websites. "
-                + "If the switch is greyed out: open App info for Focus Guard, tap ⋮ (top right), "
-                + "then \"Allow restricted settings\", and try again.", 14, INK, false), margins(dp(6)));
-        Button accBtn = button("Open Accessibility settings", false);
+        // --- Blocker switched off ---
+        accCard = Ui.card(this, Ui.WARN);
+        accCard.addView(Ui.text(this, "The blocker is switched off", 16, Ui.INK, true));
+        accCard.addView(Ui.text(this, "Turn on \"Focus Guard\" in Accessibility settings so it can block "
+                + "apps and websites. If the switch is greyed out: tap Open App info, then ⋮ (top right), "
+                + "then \"Allow restricted settings\", and try again.", 14, Ui.INK, false), Ui.top(this, 6));
+        LinearLayout accRow = Ui.row(this);
+        Button accBtn = Ui.button(this, "Accessibility", false);
         accBtn.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        accCard.addView(accBtn, margins(dp(12)));
-        Button infoBtn = button("Open App info", false);
-        infoBtn.setOnClickListener(v -> {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            i.setData(android.net.Uri.parse("package:" + getPackageName()));
-            startActivity(i);
-        });
-        accCard.addView(infoBtn, margins(dp(8)));
-        col.addView(accCard, margins(dp(16)));
+        Button infoBtn = Ui.button(this, "App info", false);
+        infoBtn.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:" + getPackageName()))));
+        accRow.addView(accBtn, Ui.weight(this, 1f, 0));
+        accRow.addView(infoBtn, Ui.weight(this, 1f, 8));
+        accCard.addView(accRow, Ui.top(this, 12));
+        col.addView(accCard, Ui.top(this, 16));
 
-        // Focus time
-        col.addView(section("Focus time (minutes)"), margins(dp(24)));
+        // --- Notifications not allowed ---
+        notifCard = Ui.card(this, Ui.WARN);
+        notifCard.addView(Ui.text(this, "Allow notifications", 16, Ui.INK, true));
+        notifCard.addView(Ui.text(this, "So you can start focus straight from your notification bar, "
+                + "without opening the app.", 14, Ui.INK, false), Ui.top(this, 6));
+        Button notifBtn = Ui.button(this, "Allow notifications", false);
+        notifBtn.setOnClickListener(v -> askNotifications(true));
+        notifCard.addView(notifBtn, Ui.top(this, 12));
+        col.addView(notifCard, Ui.top(this, 12));
+
+        // --- Status ---
+        LinearLayout statusCard = Ui.card(this, Ui.INK);
+        status = Ui.text(this, "", 20, Ui.PAPER, true);
+        statusSub = Ui.text(this, "", 14, Ui.SOFT, false);
+        statusCard.addView(status);
+        statusCard.addView(statusSub, Ui.top(this, 4));
+        col.addView(statusCard, Ui.top(this, 16));
+
+        // --- Focus (at the top, no scrolling needed) ---
+        LinearLayout focusCard = Ui.card(this, Ui.CARD);
+        focusCard.addView(Ui.text(this, "Focus time (minutes)", 17, Ui.INK, true));
+        LinearLayout chipRow = Ui.row(this);
+        for (int i = 0; i < PRESETS.length; i++) {
+            final int p = PRESETS[i];
+            Button b = Ui.chip(this, String.valueOf(p));
+            b.setOnClickListener(v -> minutesInput.setText(String.valueOf(p)));
+            chipRow.addView(b, Ui.weight(this, 1f, i == 0 ? 0 : 6));
+            chips.add(b);
+        }
+        focusCard.addView(chipRow, Ui.top(this, 10));
+
+        LinearLayout startRow = Ui.row(this);
         minutesInput = new EditText(this);
         minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        minutesInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        minutesInput.setGravity(Gravity.CENTER);
         minutesInput.setText(String.valueOf(Prefs.getMinutes(this)));
-        minutesInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        minutesInput.setTextColor(Color.parseColor(INK));
-        styleInput(minutesInput);
-        col.addView(minutesInput, margins(dp(8)));
-        lockables.add(minutesInput);
-
-        LinearLayout quick = new LinearLayout(this);
-        quick.setOrientation(LinearLayout.HORIZONTAL);
-        int[] presets = {25, 30, 45, 60, 90};
-        for (int p : presets) {
-            Button b = button(String.valueOf(p), false);
-            b.setOnClickListener(v -> minutesInput.setText(String.valueOf(p)));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            lp.setMargins(dp(3), 0, dp(3), 0);
-            quick.addView(b, lp);
-            lockables.add(b);
-        }
-        col.addView(quick, margins(dp(10)));
-
-        // Websites
-        col.addView(section("Websites to block"), margins(dp(24)));
-        col.addView(label("One per line, e.g. youtube.com. Works in Chrome, Edge, Brave, Firefox, "
-                + "Samsung Internet and Opera.", 13, MUTED, false), margins(dp(4)));
-        sitesInput = new EditText(this);
-        sitesInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_VARIATION_URI | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        sitesInput.setMinLines(4);
-        sitesInput.setGravity(Gravity.TOP | Gravity.START);
-        sitesInput.setHint("youtube.com\nfacebook.com\ninstagram.com");
-        sitesInput.setTextColor(Color.parseColor(INK));
-        styleInput(sitesInput);
-        List<String> savedSites = new ArrayList<>(Prefs.getSites(this));
-        java.util.Collections.sort(savedSites);
-        sitesInput.setText(android.text.TextUtils.join("\n", savedSites));
-        col.addView(sitesInput, margins(dp(8)));
-        lockables.add(sitesInput);
-
-        // Apps
-        col.addView(section("Apps to block"), margins(dp(24)));
-        appsBox = new LinearLayout(this);
-        appsBox.setOrientation(LinearLayout.VERTICAL);
-        appsBox.setPadding(dp(8), dp(4), dp(8), dp(4));
-        appsBox.setBackground(round("#FFFFFF", 14));
-        appsLoading = label("Loading your apps…", 14, MUTED, false);
-        appsLoading.setPadding(dp(8), dp(12), dp(8), dp(12));
-        appsBox.addView(appsLoading);
-        col.addView(appsBox, margins(dp(8)));
-
-        // Start
-        startBtn = button("Start focus", true);
+        Ui.styleInput(this, minutesInput);
+        minutesInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) { highlightChips(); }
+        });
+        startBtn = Ui.button(this, "Start focus", true);
         startBtn.setOnClickListener(v -> confirmStart());
-        col.addView(startBtn, margins(dp(28)));
+        startRow.addView(minutesInput, new LinearLayout.LayoutParams(Ui.dp(this, 88),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        startRow.addView(startBtn, Ui.weight(this, 1f, 12));
+        focusCard.addView(startRow, Ui.top(this, 12));
+        col.addView(focusCard, Ui.top(this, 12));
 
-        setContentView(scroll);
-        loadApps();
+        // --- Week over ---
+        weekCard = Ui.card(this, Ui.WARN);
+        weekCard.addView(Ui.text(this, "Your plan's week is over", 16, Ui.INK, true));
+        weekCard.addView(Ui.text(this, "Keep the same daily limits and bedtime for another 7 days, "
+                + "or change them now. Until you choose, your current limits stay on.", 14, Ui.INK, false),
+                Ui.top(this, 6));
+        LinearLayout weekRow = Ui.row(this);
+        Button keep = Ui.button(this, "Keep for 7 days", false);
+        keep.setOnClickListener(v -> {
+            Rules.lockPlan(this);
+            Rules.toast(this, "Same plan locked for another 7 days.");
+            refreshPlan();
+            refreshStatus();
+        });
+        Button change = Ui.button(this, "Change it", false);
+        change.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
+        weekRow.addView(keep, Ui.weight(this, 1f, 0));
+        weekRow.addView(change, Ui.weight(this, 1f, 8));
+        weekCard.addView(weekRow, Ui.top(this, 12));
+        col.addView(weekCard, Ui.top(this, 12));
+
+        // --- Daily limits & bedtime ---
+        LinearLayout planCard = Ui.card(this, Ui.CARD);
+        planCard.addView(Ui.text(this, "Daily limits & bedtime", 17, Ui.INK, true));
+        planBody = new LinearLayout(this);
+        planBody.setOrientation(LinearLayout.VERTICAL);
+        planCard.addView(planBody, Ui.top(this, 8));
+        col.addView(planCard, Ui.top(this, 12));
+
+        // --- Distracting list ---
+        LinearLayout listCard = Ui.card(this, Ui.CARD);
+        listCard.addView(Ui.text(this, "Distracting apps & websites", 17, Ui.INK, true));
+        listCard.addView(Ui.text(this, "Blocked during focus time and bedtime.", 14, Ui.MUTED, false),
+                Ui.top(this, 2));
+        listSummary = Ui.text(this, "", 15, Ui.INK, false);
+        listCard.addView(listSummary, Ui.top(this, 8));
+        Button editList = Ui.button(this, "Edit list", false);
+        editList.setOnClickListener(v -> startActivity(new Intent(this, BlockListActivity.class)));
+        listCard.addView(editList, Ui.top(this, 12));
+        col.addView(listCard, Ui.top(this, 12));
+
+        // --- Quick start help ---
+        LinearLayout tips = Ui.card(this, Ui.CARD);
+        tips.addView(Ui.text(this, "Start focus without opening the app", 17, Ui.INK, true));
+        tips.addView(Ui.text(this,
+                "• Notification bar: tap 30, 45 or 60 min on the Focus Guard notification.\n"
+                        + "• Quick Settings: swipe down twice, tap the ✏️ edit button, and drag the "
+                        + "\"Focus\" tile into your tiles. Tap it to start.\n"
+                        + "• Home screen: long-press the Focus Guard icon and pick a time.",
+                14, Ui.INK, false), Ui.top(this, 6));
+        col.addView(tips, Ui.top(this, 12));
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        if (needsNotifications() && !Prefs.getBool(this, "asked_notif")) {
+            Prefs.putBool(this, "asked_notif", true);
+            askNotifications(false);
+        }
+        Notifier.update(this, true);
+        refreshPlan();
+        refreshStatus();
         handler.removeCallbacks(tick);
-        handler.post(tick);
+        handler.postDelayed(tick, 1000L);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(tick);
-        if (!Prefs.isActive(this)) saveChoices();
     }
 
-    // ---------- logic ----------
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        Notifier.update(this, true);
+        refreshStatus();
+    }
 
-    private void refreshUi() {
-        boolean active = Prefs.isActive(this);
-        accCard.setVisibility(isBlockerOn() ? View.GONE : View.VISIBLE);
+    // ---------- refresh ----------
 
-        if (active) {
-            status.setText("Focus is ON  ·  " + Prefs.format(Prefs.remaining(this)) + " left\n"
-                    + "Blocked apps, websites and these settings are locked until time is up.");
-            startBtn.setText("Locked until focus ends");
+    private void refreshStatus() {
+        accCard.setVisibility(Rules.blockerOn(this) ? View.GONE : View.VISIBLE);
+        notifCard.setVisibility(needsNotifications() ? View.VISIBLE : View.GONE);
+        weekCard.setVisibility(Rules.weekOver(this) ? View.VISIBLE : View.GONE);
+
+        boolean focus = Rules.focusOn(this);
+        long now = System.currentTimeMillis();
+        if (Rules.emergencyOn(this)) {
+            status.setText("Emergency time · " + Prefs.format(Prefs.getLong(this, "em_until") - now) + " left");
+            statusSub.setText("Blocking comes back on automatically.");
+        } else if (focus) {
+            status.setText("Focus is ON · " + Prefs.format(Prefs.remaining(this)) + " left");
+            statusSub.setText("Blocked apps, websites and settings are locked until it ends.");
+        } else if (Rules.sleepNow(this)) {
+            status.setText("Bedtime 🌙");
+            statusSub.setText("Distracting apps are blocked until "
+                    + Prefs.clock(this, Prefs.sleepEnd(this)) + ".");
         } else {
-            status.setText("Ready to focus\nChoose what to block, set the time, and start.");
-            startBtn.setText("Start focus");
+            status.setText("Ready to focus");
+            statusSub.setText(Rules.planLocked(this)
+                    ? "Weekly plan locked until " + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock")) + "."
+                    : "Pick a time and tap Start focus.");
         }
-        startBtn.setEnabled(!active);
-        startBtn.setAlpha(active ? 0.5f : 1f);
-        for (View v : lockables) {
-            v.setEnabled(!active);
-            v.setAlpha(active ? 0.5f : 1f);
-        }
-        for (CheckBox c : appChecks) c.setEnabled(!active);
+
+        startBtn.setText(focus ? "Focus is on" : "Start focus");
+        Ui.enable(startBtn, !focus);
+        Ui.enable(minutesInput, !focus);
+        for (Button b : chips) Ui.enable(b, !focus);
+        highlightChips();
+
+        int apps = Rules.blockedApps(this).size();
+        int sites = Rules.blockedSites(this).size();
+        listSummary.setText(apps + (apps == 1 ? " app" : " apps") + " · "
+                + sites + (sites == 1 ? " website" : " websites"));
     }
 
-    private void confirmStart() {
-        if (Prefs.isActive(this)) return;
-
-        if (!isBlockerOn()) {
-            toast("Turn on the blocker in Accessibility settings first.");
+    private void refreshPlan() {
+        planBody.removeAllViews();
+        if (!Rules.hasPlan(this)) {
+            planBody.addView(Ui.text(this, "Give apps like Facebook or TikTok a daily time limit, and set a "
+                    + "bedtime when distracting apps are blocked. Once saved, the plan is locked for 7 days.",
+                    14, Ui.MUTED, false));
+            Button setup = Ui.button(this, "Set up plan", false);
+            setup.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
+            planBody.addView(setup, Ui.top(this, 12));
             return;
         }
 
+        String bed = Prefs.sleepOn(this)
+                ? "🌙 Bedtime: " + Prefs.clock(this, Prefs.sleepStart(this)) + " – "
+                + Prefs.clock(this, Prefs.sleepEnd(this))
+                : "🌙 Bedtime: off";
+        planBody.addView(Ui.text(this, bed, 15, Ui.INK, false));
+
+        for (Map.Entry<String, Integer> e : Prefs.getLimits(this).entrySet()) {
+            long used = Prefs.getUsage(this, e.getKey()) / Rules.MIN;
+            boolean done = used >= e.getValue();
+            String line = "⏳ " + Apps.label(this, e.getKey()) + ": " + Math.min(used, e.getValue())
+                    + " of " + e.getValue() + " min used today" + (done ? " · limit reached" : "");
+            planBody.addView(Ui.text(this, line, 15, done ? Ui.RED : Ui.INK, false), Ui.top(this, 4));
+        }
+
+        boolean locked = Rules.planLocked(this);
+        String lockLine = locked
+                ? "🔒 Locked until " + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock"))
+                : "🔓 Unlocked: you can change it now";
+        planBody.addView(Ui.text(this, lockLine, 14, Ui.MUTED, false), Ui.top(this, 8));
+
+        Button open = Ui.button(this, locked ? "View plan" : "Edit plan", false);
+        open.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
+        planBody.addView(open, Ui.top(this, 12));
+    }
+
+    private void highlightChips() {
+        String v = minutesInput.getText().toString().trim();
+        for (int i = 0; i < chips.size(); i++) {
+            Ui.setChip(this, chips.get(i), v.equals(String.valueOf(PRESETS[i])));
+        }
+    }
+
+    // ---------- actions ----------
+
+    private void confirmStart() {
+        if (Rules.focusOn(this)) return;
         int minutes;
         try {
             minutes = Integer.parseInt(minutesInput.getText().toString().trim());
@@ -222,185 +304,39 @@ public class MainActivity extends Activity {
             minutes = 0;
         }
         if (minutes < 1 || minutes > 720) {
-            toast("Enter a focus time between 1 and 720 minutes.");
+            Rules.toast(this, "Enter a focus time between 1 and 720 minutes.");
             return;
         }
-
-        saveChoices();
-        if (Prefs.getApps(this).isEmpty() && Prefs.getSites(this).isEmpty()) {
-            toast("Pick at least one app or website to block.");
-            return;
-        }
-
+        Prefs.setMinutes(this, minutes);
         final int mins = minutes;
         new AlertDialog.Builder(this)
                 .setTitle("Start a " + mins + "-minute focus?")
                 .setMessage("Until it ends you won't be able to open the blocked apps or websites, "
-                        + "change this list, or switch Focus Guard off. This can't be cancelled.")
+                        + "change your list, or switch Focus Guard off. You'll get 2 emergency minutes "
+                        + "every 20 minutes.")
                 .setPositiveButton("Start", (d, w) -> {
-                    Prefs.setEnd(this, System.currentTimeMillis() + mins * 60_000L);
-                    toast("Focus started. Good luck!");
-                    handler.removeCallbacks(tick);
-                    handler.post(tick);
+                    Rules.startFocus(this, mins);
+                    refreshStatus();
                 })
                 .setNegativeButton("Not yet", null)
                 .show();
     }
 
-    private void saveChoices() {
-        // minutes
-        try {
-            int m = Integer.parseInt(minutesInput.getText().toString().trim());
-            if (m > 0) Prefs.setMinutes(this, m);
-        } catch (NumberFormatException ignored) {
-        }
-        // sites
-        Set<String> sites = new HashSet<>();
-        for (String line : sitesInput.getText().toString().split("[\\n,\\s]+")) {
-            String d = Prefs.cleanDomain(line);
-            if (!d.isEmpty()) sites.add(d);
-        }
-        Prefs.setSites(this, sites);
-        // apps (only once the list has loaded, so we never wipe saved choices)
-        if (!appChecks.isEmpty()) {
-            Set<String> apps = new HashSet<>();
-            for (CheckBox c : appChecks) {
-                if (c.isChecked()) apps.add((String) c.getTag());
-            }
-            Prefs.setApps(this, apps);
+    private boolean needsNotifications() {
+        return Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(NOTIF_PERM) != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void askNotifications(boolean fromButton) {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (!fromButton || shouldShowRequestPermissionRationale(NOTIF_PERM)) {
+            requestPermissions(new String[]{NOTIF_PERM}, 7);
+        } else {
+            startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
         }
     }
 
-    private boolean isBlockerOn() {
-        String enabled = Settings.Secure.getString(getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (enabled == null) return false;
-        ComponentName me = new ComponentName(this, BlockerService.class);
-        String all = enabled.toLowerCase(Locale.US);
-        return all.contains(me.flattenToString().toLowerCase(Locale.US))
-                || all.contains(me.flattenToShortString().toLowerCase(Locale.US));
-    }
-
-    private static class AppItem {
-        String label;
-        String pkg;
-        Drawable icon;
-    }
-
-    private void loadApps() {
-        new Thread(() -> {
-            PackageManager pm = getPackageManager();
-            Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-            List<ResolveInfo> infos = pm.queryIntentActivities(launcher, 0);
-            List<AppItem> items = new ArrayList<>();
-            Set<String> seen = new HashSet<>();
-            for (ResolveInfo ri : infos) {
-                String pkg = ri.activityInfo.packageName;
-                if (pkg.equals(getPackageName()) || !seen.add(pkg)) continue;
-                AppItem it = new AppItem();
-                it.pkg = pkg;
-                it.label = String.valueOf(ri.loadLabel(pm));
-                try {
-                    it.icon = ri.loadIcon(pm);
-                } catch (Exception e) {
-                    it.icon = null;
-                }
-                items.add(it);
-            }
-            items.sort((a, b) -> a.label.compareToIgnoreCase(b.label));
-            runOnUiThread(() -> showApps(items));
-        }).start();
-    }
-
-    private void showApps(List<AppItem> items) {
-        appsBox.removeView(appsLoading);
-        Set<String> saved = Prefs.getApps(this);
-        boolean active = Prefs.isActive(this);
-        for (AppItem it : items) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(4), 0, dp(4));
-
-            ImageView icon = new ImageView(this);
-            if (it.icon != null) icon.setImageDrawable(it.icon);
-            row.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(36)));
-
-            CheckBox cb = new CheckBox(this);
-            cb.setText(it.label);
-            cb.setTag(it.pkg);
-            cb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-            cb.setTextColor(Color.parseColor(INK));
-            cb.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); // box on the right, name on the left
-            cb.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            cb.setChecked(saved.contains(it.pkg));
-            cb.setEnabled(!active);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            lp.setMarginStart(dp(12));
-            row.addView(cb, lp);
-
-            row.setOnClickListener(v -> {
-                if (cb.isEnabled()) cb.toggle();
-            });
-
-            appsBox.addView(row);
-            appChecks.add(cb);
-        }
-    }
-
-    // ---------- view helpers ----------
-
-    private TextView label(String s, int sp, String color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setTextColor(Color.parseColor(color));
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        t.setLineSpacing(0f, 1.15f);
-        return t;
-    }
-
-    private TextView section(String s) {
-        return label(s, 18, INK, true);
-    }
-
-    private Button button(String text, boolean primary) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, primary ? 18 : 15);
-        b.setTextColor(Color.parseColor(primary ? INK : PAPER));
-        b.setBackground(round(primary ? GOLD : INK, primary ? 28 : 12));
-        b.setPadding(dp(12), dp(primary ? 16 : 10), dp(12), dp(primary ? 16 : 10));
-        b.setStateListAnimator(null);
-        return b;
-    }
-
-    private void styleInput(EditText e) {
-        e.setBackground(round("#FFFFFF", 12));
-        e.setPadding(dp(14), dp(12), dp(14), dp(12));
-    }
-
-    private GradientDrawable round(String color, int radiusDp) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(Color.parseColor(color));
-        g.setCornerRadius(dp(radiusDp));
-        return g;
-    }
-
-    private LinearLayout.LayoutParams margins(int top) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = top;
-        return lp;
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
-    private void toast(String s) {
-        Toast.makeText(this, s, Toast.LENGTH_LONG).show();
-    }
+    @SuppressWarnings("unused")
+    private static int color(String hex) { return Color.parseColor(hex); }
 }

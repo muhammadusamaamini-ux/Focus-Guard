@@ -1,72 +1,91 @@
 package com.usama.focusguard;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** The full-screen "stay focused" wall shown when a blocked app or site is opened. */
+/** The full-screen wall shown when something is blocked. */
 public class BlockActivity extends Activity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private TextView icon;
     private TextView title;
     private TextView message;
     private TextView timer;
-    private Button button;
+    private Button emBtn;
+    private TextView emNote;
+    private Button homeBtn;
+    private String reason = Rules.FOCUS;
+    private String pkg;
 
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
             update();
-            if (Prefs.isActive(BlockActivity.this)) handler.postDelayed(this, 1000L);
+            handler.postDelayed(this, 1000L);
         }
     };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().setStatusBarColor(Color.parseColor(Ui.INK));
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        col.setBackgroundColor(Color.parseColor("#1F3A33"));
-        int pad = dp(32);
+        col.setBackgroundColor(Color.parseColor(Ui.INK));
+        int pad = Ui.dp(this, 32);
         col.setPadding(pad, pad, pad, pad);
 
-        TextView icon = text("🔒", 56, "#F2C14E", false);
-        title = text("Stay focused", 30, "#F6F4EF", true);
-        message = text("This is blocked during your focus time.", 17, "#C9D6CF", false);
-        timer = text("", 48, "#F2C14E", true);
+        icon = centered(Ui.text(this, "🔒", 56, Ui.GOLD, false));
+        title = centered(Ui.text(this, "", 30, Ui.PAPER, true));
+        message = centered(Ui.text(this, "", 17, Ui.SOFT, false));
+        timer = centered(Ui.text(this, "", 48, Ui.GOLD, true));
         timer.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
 
-        button = new Button(this);
-        button.setText("Back to studying");
-        button.setAllCaps(false);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        button.setTextColor(Color.parseColor("#1F3A33"));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#F2C14E"));
-        bg.setCornerRadius(dp(28));
-        button.setBackground(bg);
-        button.setPadding(dp(28), dp(14), dp(28), dp(14));
-        button.setOnClickListener(v -> goHome());
+        homeBtn = Ui.button(this, "Back to studying", true);
+        homeBtn.setOnClickListener(v -> goHome());
+
+        emBtn = Ui.button(this, "", false);
+        emBtn.setBackground(Ui.round(this, "#2E5248", 12));
+        emBtn.setOnClickListener(v -> confirmEmergency());
+        emNote = centered(Ui.text(this, "", 13, Ui.SOFT, false));
 
         col.addView(icon);
-        col.addView(title, spaced(dp(12)));
-        col.addView(message, spaced(dp(8)));
-        col.addView(timer, spaced(dp(28)));
-        col.addView(button, spaced(dp(36)));
-
+        col.addView(title, spaced(12));
+        col.addView(message, spaced(8));
+        col.addView(timer, spaced(20));
+        col.addView(homeBtn, spaced(32));
+        col.addView(emBtn, spaced(28));
+        col.addView(emNote, spaced(6));
         setContentView(col);
+
+        readIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        readIntent(intent);
+        update();
+    }
+
+    private void readIntent(Intent i) {
+        String r = i.getStringExtra("reason");
+        reason = r == null ? Rules.FOCUS : r;
+        pkg = i.getStringExtra("pkg");
     }
 
     @Override
@@ -83,15 +102,92 @@ public class BlockActivity extends Activity {
     }
 
     private void update() {
-        if (Prefs.isActive(this)) {
-            timer.setText(Prefs.format(Prefs.remaining(this)));
-            message.setText("This is blocked during your focus time.\nTime left:");
-        } else {
-            title.setText("Focus finished");
-            message.setText("Well done. Everything is unlocked now.");
+        long now = System.currentTimeMillis();
+        emBtn.setVisibility(View.GONE);
+        emNote.setVisibility(View.GONE);
+        homeBtn.setText("Back to studying");
+
+        if ("limit".equals(reason)) {
+            Integer lim = pkg == null ? null : Prefs.getLimits(this).get(pkg);
+            icon.setText("⏳");
+            title.setText("Daily limit reached");
+            message.setText((pkg == null ? "This app" : Apps.label(this, pkg)) + ": you've used your "
+                    + (lim == null ? "" : lim + " ") + "minutes for today.\nIt opens again after midnight.");
             timer.setText("");
-            button.setText("Done");
+            return;
         }
+        if ("guard".equals(reason)) {
+            icon.setText("🔒");
+            title.setText("Locked for now");
+            message.setText("Focus Guard's settings can't be changed or switched off while focus time, "
+                    + "bedtime or your weekly plan is on.");
+            timer.setText("");
+            return;
+        }
+
+        String mode = Rules.mode(this);
+        if (mode == null) {
+            icon.setText("✅");
+            title.setText("Unlocked");
+            message.setText("Blocking is over. Everything is open again.");
+            timer.setText("");
+            homeBtn.setText("Done");
+            return;
+        }
+
+        if (Rules.FOCUS.equals(mode)) {
+            icon.setText("🔒");
+            title.setText("Stay focused");
+            message.setText("This is blocked during your focus time.\nTime left:");
+            timer.setText(Prefs.format(Prefs.remaining(this)));
+        } else {
+            icon.setText("🌙");
+            title.setText("It's bedtime");
+            message.setText("Distracting apps are blocked until "
+                    + Prefs.clock(this, Prefs.sleepEnd(this)) + ".\nTime left:");
+            timer.setText(Prefs.format(Rules.sleepEndsAt(this) - now));
+        }
+
+        // Emergency minutes
+        long lenMin = Rules.emLength(mode) / Rules.MIN;
+        String per = Rules.SLEEP.equals(mode) ? "once an hour" : "once every 20 minutes";
+        emBtn.setVisibility(View.VISIBLE);
+        emNote.setVisibility(View.VISIBLE);
+        if (Rules.emergencyOn(this)) {
+            emBtn.setText("Emergency time is on");
+            Ui.enable(emBtn, false);
+            emNote.setText(Prefs.format(Prefs.getLong(this, "em_until") - now) + " left");
+        } else if (Rules.emAvailable(this, mode)) {
+            emBtn.setText("Emergency: open for " + lenMin + " min");
+            Ui.enable(emBtn, true);
+            emNote.setText("You can use this " + per + ".");
+        } else {
+            emBtn.setText("Emergency used");
+            Ui.enable(emBtn, false);
+            emNote.setText("Next emergency in " + Prefs.format(Rules.emAvailableAt(this, mode) - now));
+        }
+    }
+
+    private void confirmEmergency() {
+        final String mode = Rules.mode(this);
+        if (mode == null || Rules.emergencyOn(this) || !Rules.emAvailable(this, mode)) return;
+        long lenMin = Rules.emLength(mode) / Rules.MIN;
+        long perMin = Rules.emPeriod(mode) / Rules.MIN;
+        new AlertDialog.Builder(this)
+                .setTitle("Use " + lenMin + " emergency minutes?")
+                .setMessage("Blocking pauses for " + lenMin + " minutes, then comes back on by itself. "
+                        + "Your next emergency will be available in " + perMin + " minutes.")
+                .setPositiveButton("Use now", (d, w) -> {
+                    Rules.useEmergency(this, mode);
+                    Intent open = pkg == null ? null : getPackageManager().getLaunchIntentForPackage(pkg);
+                    if (open != null) {
+                        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(open);
+                    }
+                    finish();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     @Override
@@ -107,25 +203,16 @@ public class BlockActivity extends Activity {
         finish();
     }
 
-    private TextView text(String s, int sp, String color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setTextColor(Color.parseColor(color));
+    private TextView centered(TextView t) {
         t.setGravity(Gravity.CENTER);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return t;
     }
 
-    private LinearLayout.LayoutParams spaced(int top) {
+    private LinearLayout.LayoutParams spaced(int topDp) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.gravity = Gravity.CENTER_HORIZONTAL;
-        lp.topMargin = top;
+        lp.topMargin = Ui.dp(this, topDp);
         return lp;
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }

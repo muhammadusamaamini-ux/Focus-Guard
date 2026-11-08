@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Focus Guard</string>
-    <string name="acc_desc">Focus Guard uses this to see which app or website is open, so it can block the ones you chose during your focus time. Nothing is collected or sent anywhere; it all stays on your phone.</string>
+    <string name="tile_label">Focus</string>
+    <string name="acc_desc">Focus Guard uses this to see which app or website is open, so it can block the ones you chose during focus time and bedtime, and count time for your daily limits. Nothing is collected or sent anywhere; it all stays on your phone.</string>
+
+    <string name="sc_25">Focus 25 min</string>
+    <string name="sc_30">Focus 30 min</string>
+    <string name="sc_45">Focus 45 min</string>
+    <string name="sc_60">Focus 60 min</string>
 </resources>

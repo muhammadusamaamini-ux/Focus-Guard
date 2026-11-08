@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="focus25"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher"
+        android:shortcutShortLabel="@string/sc_25">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="focusguard://start/25"
+            android:targetClass="com.usama.focusguard.StartFocusActivity"
+            android:targetPackage="com.usama.focusguard" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="focus30"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher"
+        android:shortcutShortLabel="@string/sc_30">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="focusguard://start/30"
+            android:targetClass="com.usama.focusguard.StartFocusActivity"
+            android:targetPackage="com.usama.focusguard" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="focus45"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher"
+        android:shortcutShortLabel="@string/sc_45">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="focusguard://start/45"
+            android:targetClass="com.usama.focusguard.StartFocusActivity"
+            android:targetPackage="com.usama.focusguard" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="focus60"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher"
+        android:shortcutShortLabel="@string/sc_60">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="focusguard://start/60"
+            android:targetClass="com.usama.focusguard.StartFocusActivity"
+            android:targetPackage="com.usama.focusguard" />
+    </shortcut>
+</shortcuts>

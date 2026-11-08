@@ -1,10 +1,17 @@
 package com.usama.focusguard;
 
 import android.accessibilityservice.AccessibilityService;
+import android.app.KeyguardManager;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.inputmethod.InputMethodInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.Toast;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -14,13 +21,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Watches which app is on screen. During a focus session it sends you away from
- * blocked apps and blocked websites, and from the settings screens that could be
- * used to switch Focus Guard off or uninstall it.
+ * Watches which app is on screen. It blocks distracting apps and websites during focus
+ * time and bedtime, enforces daily limits, counts how long limited apps are used, and
+ * protects Focus Guard's own settings while anything is locked.
  */
 public class BlockerService extends AccessibilityService {
 
-    /** Browser package -> id of its address bar. */
     private static final Map<String, String[]> BROWSER_BARS = new HashMap<>();
 
     static {
@@ -40,42 +46,178 @@ public class BlockerService extends AccessibilityService {
                 new String[]{"com.duckduckgo.mobile.android:id/omnibarTextInput"});
     }
 
-    /** Screens where Focus Guard could be turned off or uninstalled. */
-    private static final Set<String> GUARDED = new HashSet<>(Arrays.asList(
+    /** Settings apps where Focus Guard could be switched off. */
+    private static final Set<String> SETTINGS = new HashSet<>(Arrays.asList(
             "com.android.settings",
-            "com.google.android.packageinstaller",
-            "com.android.packageinstaller",
             "com.google.android.permissioncontroller",
+            "com.android.permissioncontroller",
             "com.miui.securitycenter",
             "com.coloros.safecenter",
             "com.samsung.android.lool"
     ));
 
-    private long lastBlock = 0L;
+    /** Install/uninstall dialogs. Updates are allowed; uninstalling is not. */
+    private static final Set<String> INSTALLERS = new HashSet<>(Arrays.asList(
+            "com.google.android.packageinstaller",
+            "com.android.packageinstaller"
+    ));
+
+    private static final String[] APP_INFO_WORDS = {
+            "Force stop", "Uninstall", "Clear storage", "Clear data", "Clear cache"
+    };
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Set<String> ignored = new HashSet<>();
+    private final Set<String> warned = new HashSet<>();
+    private String warnedDay = "";
+    private String lastPkg;
+    private long lastTickAt;
+    private long lastBlock;
+
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            long next = 15_000L;
+            try {
+                next = onTick();
+            } catch (Exception ignored2) {
+                // Never let one bad tick stop the blocker.
+            }
+            handler.postDelayed(this, next);
+        }
+    };
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        ignored.add("com.android.systemui");
+        ignored.add(getPackageName());
+        try {
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) {
+                for (InputMethodInfo i : imm.getEnabledInputMethodList()) ignored.add(i.getPackageName());
+            }
+        } catch (Exception ignored2) {
+        }
+        lastTickAt = SystemClock.elapsedRealtime();
+        handler.removeCallbacks(tick);
+        handler.post(tick);
+        Notifier.update(this, true);
+    }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
-        if (!Prefs.isActive(this)) return;
-
         String pkg = event.getPackageName().toString();
-        if (pkg.equals(getPackageName())) return;
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !ignored.contains(pkg)) {
+            lastPkg = pkg;
+        }
+        evaluate(pkg);
+    }
 
-        if (Prefs.getApps(this).contains(pkg)) {
-            block(false);
+    /** Counts usage of limited apps and re-checks the screen. Returns ms until the next tick. */
+    private long onTick() {
+        long nowUp = SystemClock.elapsedRealtime();
+        long delta = Math.min(nowUp - lastTickAt, 5_000L);
+        lastTickAt = nowUp;
+
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        boolean screenOn = pm != null && pm.isInteractive() && (km == null || !km.isKeyguardLocked());
+
+        if (screenOn) {
+            String pkg = activePackage();
+            if (pkg != null) {
+                Integer lim = Prefs.getLimits(this).get(pkg);
+                if (lim != null && delta > 0) {
+                    long used = Prefs.addUsage(this, pkg, delta);
+                    warnIfNearLimit(pkg, used, lim);
+                }
+                evaluate(pkg);
+            }
+        }
+
+        Notifier.update(this);
+        if (Rules.weekOver(this)) {
+            long lock = Prefs.getLong(this, "plan_lock");
+            if (Prefs.getLong(this, "week_notified") != lock) {
+                Prefs.putLong(this, "week_notified", lock);
+                Notifier.weekOver(this);
+            }
+        }
+        return screenOn ? 3_000L : 15_000L;
+    }
+
+    private String activePackage() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root != null && root.getPackageName() != null) {
+            String p = root.getPackageName().toString();
+            return ignored.contains(p) ? null : p;
+        }
+        return lastPkg;
+    }
+
+    private void warnIfNearLimit(String pkg, long used, int limitMin) {
+        String today = Prefs.today();
+        if (!today.equals(warnedDay)) {
+            warned.clear();
+            warnedDay = today;
+        }
+        long limit = limitMin * Rules.MIN;
+        if (used >= limit - Rules.MIN && used < limit && warned.add(pkg)) {
+            Toast.makeText(this, "⏳ " + Apps.label(this, pkg) + ": 1 minute left today",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void evaluate(String pkg) {
+        if (pkg == null || pkg.equals(getPackageName())) return;
+
+        // 1. Protect Focus Guard itself while anything is locked.
+        if (SETTINGS.contains(pkg) || INSTALLERS.contains(pkg)) {
+            if (Rules.guardOn(this) && guardHit(pkg)) block("guard", pkg, false);
+            return;
+        }
+        if (ignored.contains(pkg)) return;
+
+        // 2. Daily limits (always on, emergencies don't apply).
+        Integer lim = Prefs.getLimits(this).get(pkg);
+        if (lim != null && Prefs.getUsage(this, pkg) >= lim * Rules.MIN) {
+            block("limit", pkg, false);
             return;
         }
 
-        if (GUARDED.contains(pkg)) {
-            if (screenMentionsFocusGuard()) block(false);
+        // 3. Focus time and bedtime.
+        String mode = Rules.mode(this);
+        if (mode == null || Rules.emergencyOn(this)) return;
+        if (Rules.blockedApps(this).contains(pkg)) {
+            block(mode, pkg, false);
             return;
         }
-
         String[] barIds = BROWSER_BARS.get(pkg);
         if (barIds != null) {
             String url = readAddressBar(barIds);
-            if (url != null && isBlockedSite(url)) block(true);
+            if (url != null && isBlockedSite(url)) block(mode, pkg, true);
         }
+    }
+
+    private boolean guardHit(String pkg) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        String name = getString(R.string.app_name);
+        if (INSTALLERS.contains(pkg)) return has(root, name) && has(root, "uninstall");
+
+        if (has(root, "Focus Guard uses this to see")) return true;   // its Accessibility page
+        if (has(root, "Stop " + name) || has(root, "Turn off " + name)) return true;
+        if (has(root, name)) {
+            for (String w : APP_INFO_WORDS) if (has(root, w)) return true;   // its App info page
+        }
+        return false;
+    }
+
+    private static boolean has(AccessibilityNodeInfo root, String text) {
+        List<AccessibilityNodeInfo> n = root.findAccessibilityNodeInfosByText(text);
+        return n != null && !n.isEmpty();
     }
 
     private String readAddressBar(String[] ids) {
@@ -94,35 +236,34 @@ public class BlockerService extends AccessibilityService {
     private boolean isBlockedSite(String addressText) {
         String host = Prefs.cleanDomain(addressText);
         if (host.isEmpty()) return false;
-        for (String site : Prefs.getSites(this)) {
+        for (String site : Rules.blockedSites(this)) {
             if (site.isEmpty()) continue;
             if (host.equals(site) || host.endsWith("." + site)) return true;
         }
         return false;
     }
 
-    private boolean screenMentionsFocusGuard() {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
-        List<AccessibilityNodeInfo> nodes =
-                root.findAccessibilityNodeInfosByText(getString(R.string.app_name));
-        return nodes != null && !nodes.isEmpty();
-    }
-
-    private void block(boolean fromBrowser) {
+    private void block(String reason, String pkg, boolean fromBrowser) {
         long now = SystemClock.uptimeMillis();
         if (now - lastBlock < 1200L) return;
         lastBlock = now;
 
         performGlobalAction(fromBrowser ? GLOBAL_ACTION_BACK : GLOBAL_ACTION_HOME);
 
-        Intent i = new Intent(this, BlockActivity.class);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent i = new Intent(this, BlockActivity.class)
+                .putExtra("reason", reason)
+                .putExtra("pkg", pkg)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         startActivity(i);
     }
 
     @Override
     public void onInterrupt() {
-        // Nothing to clean up.
+    }
+
+    @Override
+    public void onDestroy() {
+        handler.removeCallbacks(tick);
+        super.onDestroy();
     }
 }
