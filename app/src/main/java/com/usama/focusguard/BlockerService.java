@@ -284,14 +284,21 @@ public class BlockerService extends AccessibilityService {
         if (now - lastBlock < 1200L) return;
         lastBlock = now;
 
-        performGlobalAction(fromBrowser ? GLOBAL_ACTION_BACK : GLOBAL_ACTION_HOME);
+        // Show the message first, then send the blocked app to the background behind it.
+        if (overlay == null) overlay = new BlockOverlay(this);
+        boolean shown = overlay.show(reason, pkg);
+        performGlobalAction(GLOBAL_ACTION_HOME);
 
-        Intent i = new Intent(this, BlockActivity.class)
-                .putExtra("reason", reason)
-                .putExtra("pkg", pkg)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        startActivity(i);
+        if (!shown) {
+            // Fallback: the old full-screen page, shown a moment after the home screen opens.
+            handler.postDelayed(() -> startActivity(new Intent(this, BlockActivity.class)
+                    .putExtra("reason", reason)
+                    .putExtra("pkg", pkg)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)), 400L);
+        }
     }
+
+    private BlockOverlay overlay;
 
     @Override
     public void onInterrupt() {
@@ -300,6 +307,7 @@ public class BlockerService extends AccessibilityService {
     @Override
     public void onDestroy() {
         handler.removeCallbacks(tick);
+        if (overlay != null) overlay.hide();
         super.onDestroy();
     }
 }
