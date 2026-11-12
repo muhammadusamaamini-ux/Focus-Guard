@@ -109,10 +109,18 @@ public class BlockerService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
         String pkg = event.getPackageName().toString();
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !ignored.contains(pkg)) {
-            lastPkg = pkg;
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (!ignored.contains(pkg)) lastPkg = pkg;
+            Gray.apply(this, grayKey(pkg));
         }
         evaluate(pkg);
+    }
+
+    /** The app that grayscale should look at: null for the notification shade and keyboard. */
+    private String grayKey(String pkg) {
+        if (pkg == null) return null;
+        if (pkg.equals(getPackageName())) return pkg;   // Focus Guard's own screens are never gray in focus
+        return ignored.contains(pkg) ? null : pkg;
     }
 
     /** Counts usage of limited apps and re-checks the screen. Returns ms until the next tick. */
@@ -125,7 +133,12 @@ public class BlockerService extends AccessibilityService {
         KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         boolean screenOn = pm != null && pm.isInteractive() && (km == null || !km.isKeyguardLocked());
 
+        String onScreen = null;
         if (screenOn) {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && root.getPackageName() != null) {
+                onScreen = grayKey(root.getPackageName().toString());
+            }
             String pkg = activePackage();
             if (pkg != null) {
                 Integer lim = Rules.activeLimits(this).get(pkg);
@@ -138,7 +151,7 @@ public class BlockerService extends AccessibilityService {
         }
 
         Notifier.update(this);
-        Gray.apply(this);
+        Gray.apply(this, onScreen);
         Dnd.apply(this);
         if (Rules.weekOver(this)) {
             long lock = Prefs.getLong(this, "plan_lock");

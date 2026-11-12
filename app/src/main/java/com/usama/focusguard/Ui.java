@@ -76,7 +76,8 @@ public final class Ui {
 
     /** Creates a scrolling page, shows it, and returns the column to add views to. */
     public static LinearLayout page(Activity a) {
-        a.getWindow().setStatusBarColor(Color.parseColor(dark ? PAPER : DARK));
+        a.getWindow().setStatusBarColor(Color.parseColor(PAPER));
+        if (!dark) a.getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         ScrollView scroll = new ScrollView(a);
         scroll.setBackgroundColor(Color.parseColor(PAPER));
         scroll.setFillViewport(true);
@@ -177,5 +178,60 @@ public final class Ui {
     public static void enable(View v, boolean on) {
         v.setEnabled(on);
         v.setAlpha(on ? 1f : 0.45f);
+    }
+
+    /** Small grey heading above a group, e.g. "WAYS TO DISCONNECT". */
+    public static TextView section(Context c, String s) {
+        TextView t = text(c, s.toUpperCase(java.util.Locale.getDefault()), 12, MUTED, true);
+        t.setLetterSpacing(0.08f);
+        t.setPadding(dp(c, 6), 0, 0, 0);
+        return t;
+    }
+
+    /** Card with no inner padding, for lists of rows. */
+    public static LinearLayout listCard(Context c) {
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setBackground(round(c, CARD, 18));
+        l.setClipToOutline(true);
+        return l;
+    }
+
+    /** A tappable row: round icon, title, subtitle and an arrow. */
+    public static LinearLayout listRow(Context c, String emoji, String title, String sub,
+                                       View.OnClickListener click) {
+        LinearLayout row = row(c);
+        row.setPadding(dp(c, 14), dp(c, 12), dp(c, 12), dp(c, 12));
+        TextView ic = text(c, emoji, 19, INK, false);
+        ic.setGravity(android.view.Gravity.CENTER);
+        ic.setBackground(round(c, dark ? "#2A3733" : "#EDF2EF", 22));
+        row.addView(ic, new LinearLayout.LayoutParams(dp(c, 42), dp(c, 42)));
+
+        LinearLayout mid = new LinearLayout(c);
+        mid.setOrientation(LinearLayout.VERTICAL);
+        mid.addView(text(c, title, 16, INK, true));
+        if (sub != null && !sub.isEmpty()) mid.addView(text(c, sub, 13, MUTED, false));
+        row.addView(mid, weight(c, 1f, 14));
+
+        if (click != null) {
+            row.addView(text(c, "›", 24, MUTED, false));
+            row.setOnClickListener(click);
+            TypedValue tv = new TypedValue();
+            if (c.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true)) {
+                row.setForeground(c.getDrawable(tv.resourceId));
+            }
+        }
+        return row;
+    }
+
+    /** Thin line between rows of a list card. */
+    public static View divider(Context c) {
+        View v = new View(c);
+        v.setBackgroundColor(Color.parseColor(TRACK));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(c, 1) / 2 + 1));
+        lp.setMarginStart(dp(c, 70));
+        v.setLayoutParams(lp);
+        return v;
     }
 }

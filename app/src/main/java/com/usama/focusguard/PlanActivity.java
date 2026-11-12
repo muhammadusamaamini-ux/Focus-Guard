@@ -146,6 +146,15 @@ public class PlanActivity extends Activity {
 
         refreshLimits();
         refreshEnabled();
+
+        // Opened from a specific row on the Home screen: jump to that part.
+        String section = getIntent().getStringExtra("section");
+        final View target = "bedtime".equals(section) ? bedCard
+                : "schedule".equals(section) ? schCard : null;
+        if (target != null) {
+            col.post(() -> ((android.widget.ScrollView) col.getParent())
+                    .smoothScrollTo(0, Math.max(0, target.getTop() - Ui.dp(this, 12))));
+        }
     }
 
     private Switch header(LinearLayout card, String title, boolean on) {

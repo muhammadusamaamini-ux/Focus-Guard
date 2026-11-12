@@ -27,7 +27,10 @@ public final class Gray {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
-    public static boolean focusWanted(Context c) { return Prefs.getBool(c, "gray_focus"); }
+    /** During focus: only your distracting apps turn gray (while one of them is on screen). */
+    public static boolean focusWanted(Context c) { return Prefs.sp(c).getBoolean("gray_focus", true); }
+
+    private static String lastApp;
 
     public static boolean sleepWanted(Context c) { return Prefs.sp(c).getBoolean("gray_sleep", true); }
 
@@ -40,10 +43,18 @@ public final class Gray {
         return Settings.Secure.getInt(r, ENABLED, 0) == 1 && Settings.Secure.getInt(r, MODE, -1) == MODE_GRAY;
     }
 
-    /** Called every few seconds by the blocker: grayscale on or off as needed. */
-    public static void apply(Context c) {
+    /**
+     * Called by the blocker whenever the app on screen changes, and every few seconds.
+     * Bedtime: the whole screen is gray. Focus: the screen is gray only while one of your
+     * distracting apps is open (for example during emergency minutes), normal everywhere else.
+     * appOnScreen may be null (notification shade, keyboard): then the last app is kept.
+     */
+    public static void apply(Context c, String appOnScreen) {
+        if (appOnScreen != null) lastApp = appOnScreen;
         if (!canControl(c)) return;
-        boolean want = (Rules.focusActive(c) && focusWanted(c)) || (Rules.sleepNow(c) && sleepWanted(c));
+        boolean distracting = lastApp != null && Rules.blockedApps(c).contains(lastApp);
+        boolean want = (Rules.sleepNow(c) && sleepWanted(c))
+                || (Rules.focusActive(c) && focusWanted(c) && distracting);
         boolean ours = Prefs.getBool(c, "gray_ours");
         ContentResolver r = c.getContentResolver();
         try {

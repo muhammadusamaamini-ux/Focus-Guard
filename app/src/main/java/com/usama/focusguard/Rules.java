@@ -74,6 +74,20 @@ public final class Rules {
         return end;
     }
 
+    /** How much of the current focus is still left, from 1 (just started) to 0 (done). */
+    public static float focusProgress(Context c) {
+        long left = focusLeft(c);
+        long total;
+        if (focusOn(c) && focusEndsAt(c) == Prefs.getEnd(c)) {
+            total = Prefs.getLong(c, "focus_total");
+        } else {
+            int s = Prefs.schedStart(c), e = Prefs.schedEnd(c);
+            total = ((e - s + 24 * 60) % (24 * 60)) * MIN;
+        }
+        if (total <= 0) return left > 0 ? 1f : 0f;
+        return Math.max(0f, Math.min(1f, left / (float) total));
+    }
+
     public static long focusLeft(Context c) {
         return Math.max(0L, focusEndsAt(c) - System.currentTimeMillis());
     }
@@ -198,6 +212,7 @@ public final class Rules {
             toast(c, "Choose between 1 and 720 minutes.");
             return false;
         }
+        Prefs.putLong(c, "focus_total", minutes * MIN);
         Prefs.setEnd(c, System.currentTimeMillis() + minutes * MIN);
         Notifier.update(c, true);
         refreshTile(c);

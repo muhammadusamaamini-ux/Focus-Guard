@@ -13,6 +13,8 @@ public class BarView extends View {
 
     public interface OnPick { void onPick(int index); }
 
+    public interface Format { String text(long value); }
+
     private final Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint value = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -21,6 +23,7 @@ public class BarView extends View {
     private String[] labels = new String[0];
     private int selected = -1;
     private OnPick listener;
+    private Format format = Prefs::duration;
     private final int heightPx;
 
     public BarView(Context c, int heightDp) {
@@ -44,6 +47,8 @@ public class BarView extends View {
 
     public void setOnPick(OnPick l) { listener = l; }
 
+    public void setFormat(Format f) { format = f; }
+
     @Override
     protected void onMeasure(int w, int h) {
         setMeasuredDimension(MeasureSpec.getSize(w), heightPx);
@@ -66,7 +71,7 @@ public class BarView extends View {
         for (int i = 0; i < n; i++) {
             float cx = slot * i + slot / 2f;
             float bh = values[i] <= 0 ? 0 : Math.max(Ui.dp(getContext(), 3), chartH * values[i] / max);
-            bar.setColor(Color.parseColor(i == selected ? Ui.GOLD : "#9DB5AC"));
+            bar.setColor(Color.parseColor(i == selected ? Ui.GOLD : (Ui.dark ? "#3E5A51" : "#9DB5AC")));
             if (selected < 0) bar.setColor(Color.parseColor("#5E9C8A"));
             rect.set(cx - bw / 2f, topArea + chartH - bh, cx + bw / 2f, topArea + chartH);
             if (bh > 0) canvas.drawRoundRect(rect, radius, radius, bar);
@@ -74,7 +79,7 @@ public class BarView extends View {
                 canvas.drawText(labels[i], cx, h - Ui.dp(getContext(), 5), label);
             }
             if (i == selected && values[i] > 0) {
-                canvas.drawText(Prefs.duration(values[i]), cx, rect.top - Ui.dp(getContext(), 4), value);
+                canvas.drawText(format.text(values[i]), cx, rect.top - Ui.dp(getContext(), 4), value);
             }
         }
     }

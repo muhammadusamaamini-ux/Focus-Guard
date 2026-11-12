@@ -9,15 +9,14 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.text.Editable;
 import android.text.InputType;
-import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -37,96 +36,116 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
 
-    private static final int[] PRESETS = {25, 30, 45, 60, 90};
+    private static final int HOME = 0, DASH = 1, FOCUS = 2, SETTINGS = 3;
+    private static final String[] TAB_NAMES = {"Home", "Dashboard", "Focus", "Settings"};
+    private static final String[] TAB_ICONS = {"🏠", "📊", "🎯", "⚙️"};
+    private static final int[] PRESETS = {15, 25, 45, 60};
     private static final String NOTIF_PERM = "android.permission.POST_NOTIFICATIONS";
-    private static final String[] TAB_NAMES = {"Dashboard", "Focus", "Limits", "Settings"};
-    private static final String[] TAB_ICONS = {"📊", "🎯", "⏳", "⚙️"};
-    private int[] RING_COLORS;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final List<Button> chips = new ArrayList<>();
     private final ScrollView[] tabs = new ScrollView[4];
     private final TextView[] navIcons = new TextView[4];
     private final TextView[] navLabels = new TextView[4];
+    private int[] ringColors;
     private int tab;
     private int ticks;
 
-    // Global
     private LinearLayout accCard;
 
+    // Usage data shared by Home and Dashboard
+    private UsageData.Day[] week;
+    private final Map<String, Drawable> icons = new ConcurrentHashMap<>();
+    private final Map<String, String> labels = new ConcurrentHashMap<>();
+    private boolean loading;
+
+    // Home
+    private LinearLayout weekCard;
+    private LinearLayout homeNoAccess;
+    private LinearLayout homeSummary;
+    private RingView homeRing;
+    private LinearLayout homeLegend;
+    private TextView homeUnlocks;
+    private LinearLayout homeRows;
+
     // Dashboard
-    private LinearLayout usageCard;
+    private LinearLayout dashNoAccess;
     private LinearLayout dashContent;
+    private final List<Button> metricChips = new ArrayList<>();
+    private int metric;          // 0 screen time, 1 times opened, 2 unlocks
+    private int dayIdx = 6;      // 6 = today
     private TextView dayLabel;
     private Button prevDay;
     private Button nextDay;
     private RingView ring;
     private LinearLayout legend;
-    private TextView statUnlocks;
-    private TextView statApps;
     private BarView weekBars;
+    private TextView appsTitle;
     private LinearLayout appList;
-    private UsageData.Day[] week;
-    private final Map<String, Drawable> icons = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Map<String, String> labels = new java.util.concurrent.ConcurrentHashMap<>();
-    private int dayIdx = 6;
-    private boolean loading;
 
     // Focus
-    private TextView status;
-    private TextView statusSub;
-    private EditText minutesInput;
+    private FocusDial dial;
+    private final List<Button> presetChips = new ArrayList<>();
+    private Button minusBtn;
+    private Button plusBtn;
     private Button startBtn;
+    private TextView focusNote;
+    private LinearLayout distractBox;
     private Switch grayFocus;
-    private TextView listSummary;
-
-    // Limits
-    private LinearLayout weekCard;
-    private LinearLayout planBody;
+    private LinearLayout focusRows;
 
     // Settings
     private LinearLayout settingsBody;
 
+    private AlertDialog weekDialog;
+
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            refreshStatus();
+            refreshFocus();
+            refreshTop();
             if (++ticks % 15 == 0) {
-                refreshPlan();
+                refreshHomeRows();
                 refreshSettings();
             }
             handler.postDelayed(this, 1000L);
         }
     };
 
+    // =====================================================================
+    // Setup
+    // =====================================================================
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         Ui.applyTheme(this);
         super.onCreate(savedInstanceState);
-        RING_COLORS = new int[]{
+        ringColors = new int[]{
                 Color.parseColor(Ui.dark ? "#7FC7B0" : "#1F3A33"), Color.parseColor("#F2C14E"),
                 Color.parseColor("#5E9C8A"), Color.parseColor("#D9825B"), Color.parseColor("#8C7AA9"),
                 Color.parseColor(Ui.dark ? "#5A6B65" : "#C9D6CF")
         };
-        getWindow().setStatusBarColor(Color.parseColor(Ui.dark ? Ui.PAPER : Ui.DARK));
+        getWindow().setStatusBarColor(Color.parseColor(Ui.PAPER));
+        if (!Ui.dark && Build.VERSION.SDK_INT >= 23) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor(Ui.PAPER));
 
-        // Blocker-off warning stays above every tab.
         accCard = Ui.card(this, Ui.WARN);
         accCard.addView(Ui.text(this, "⚠️ The blocker is switched off", 15, Ui.INK, true));
         accCard.addView(Ui.text(this, "Nothing can be blocked until you turn on Focus Guard in Accessibility.",
                 13, Ui.INK, false), Ui.top(this, 2));
         Button fix = Ui.button(this, "Turn it on", false);
-        fix.setOnClickListener(v -> openTab(3));
+        fix.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         accCard.addView(fix, Ui.top(this, 8));
         LinearLayout.LayoutParams accLp = Ui.top(this, 0);
-        accLp.setMargins(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), 0);
+        accLp.setMargins(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 14), 0);
         root.addView(accCard, accLp);
 
         FrameLayout content = new FrameLayout(this);
@@ -136,19 +155,19 @@ public class MainActivity extends Activity {
             sv.setFillViewport(true);
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
-            col.setPadding(Ui.dp(this, 16), Ui.dp(this, 18), Ui.dp(this, 16), Ui.dp(this, 28));
+            col.setPadding(Ui.dp(this, 16), Ui.dp(this, 20), Ui.dp(this, 16), Ui.dp(this, 28));
             sv.addView(col);
             content.addView(sv);
             tabs[i] = sv;
         }
-        buildDashboard(col(0));
-        buildFocus(col(1));
-        buildLimits(col(2));
-        buildSettings(col(3));
+        buildHome(col(HOME));
+        buildDashboard(col(DASH));
+        buildFocus(col(FOCUS));
+        buildSettings(col(SETTINGS));
 
         root.addView(buildNav());
         setContentView(root);
-        openTab(Prefs.sp(this).getInt("tab", 0));
+        openTab(Prefs.sp(this).getInt("tab", HOME));
     }
 
     private LinearLayout col(int i) { return (LinearLayout) tabs[i].getChildAt(0); }
@@ -157,17 +176,18 @@ public class MainActivity extends Activity {
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
         nav.setBackgroundColor(Color.parseColor(Ui.CARD));
-        nav.setElevation(Ui.dp(this, 8));
-        nav.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 8));
+        nav.setElevation(Ui.dp(this, 10));
+        nav.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 10));
         for (int i = 0; i < 4; i++) {
             final int idx = i;
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            navIcons[i] = Ui.text(this, TAB_ICONS[i], 20, Ui.INK, false);
+            navIcons[i] = Ui.text(this, TAB_ICONS[i], 19, Ui.INK, false);
             navIcons[i].setGravity(Gravity.CENTER);
-            navIcons[i].setPadding(Ui.dp(this, 16), Ui.dp(this, 2), Ui.dp(this, 16), Ui.dp(this, 2));
+            navIcons[i].setPadding(Ui.dp(this, 18), Ui.dp(this, 3), Ui.dp(this, 18), Ui.dp(this, 3));
             navLabels[i] = Ui.text(this, TAB_NAMES[i], 12, Ui.MUTED, false);
+            navLabels[i].setPadding(0, Ui.dp(this, 3), 0, 0);
             item.addView(navIcons[i]);
             item.addView(navLabels[i]);
             item.setOnClickListener(v -> openTab(idx));
@@ -182,94 +202,183 @@ public class MainActivity extends Activity {
         for (int k = 0; k < 4; k++) {
             boolean on = k == tab;
             tabs[k].setVisibility(on ? View.VISIBLE : View.GONE);
-            navIcons[k].setBackground(on ? Ui.round(this, Ui.GOLD, 14) : null);
+            navIcons[k].setBackground(on ? Ui.round(this, Ui.dark ? "#3A4A3F" : "#F7E3A8", 16) : null);
             navLabels[k].setTextColor(Color.parseColor(on ? Ui.INK : Ui.MUTED));
             navLabels[k].setTypeface(Typeface.DEFAULT, on ? Typeface.BOLD : Typeface.NORMAL);
         }
-        if (tab == 0) loadDashboard();
+        if (tab == HOME || tab == DASH) loadUsage();
+    }
+
+    private TextView title(LinearLayout col, String text, String sub) {
+        col.addView(Ui.text(this, text, 30, Ui.INK, true));
+        TextView s = Ui.text(this, sub, 14, Ui.MUTED, false);
+        col.addView(s, Ui.top(this, 2));
+        return s;
     }
 
     // =====================================================================
-    // Dashboard
+    // Home
     // =====================================================================
 
-    private void buildDashboard(LinearLayout col) {
-        col.addView(Ui.text(this, "Screen time", 28, Ui.INK, true));
+    private void buildHome(LinearLayout col) {
+        title(col, "Focus Guard",
+                new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(new Date()));
 
-        usageCard = Ui.card(this, Ui.WARN);
-        usageCard.addView(Ui.text(this, "Allow usage access", 16, Ui.INK, true));
-        usageCard.addView(Ui.text(this, "So Focus Guard can show how much time you spend on each app. "
-                + "On the next screen, find Focus Guard and turn it on.", 14, Ui.INK, false), Ui.top(this, 4));
+        weekCard = Ui.card(this, Ui.WARN);
+        weekCard.addView(Ui.text(this, "Your week has ended", 16, Ui.INK, true));
+        weekCard.addView(Ui.text(this, "Your app timers, bedtime and focus schedule are paused. Continue with "
+                + "last week's settings, or set new restrictions?", 14, Ui.INK, false), Ui.top(this, 6));
+        LinearLayout wr = Ui.row(this);
+        Button keep = Ui.button(this, "Keep previous", false);
+        keep.setOnClickListener(v -> keepPreviousWeek());
+        Button change = Ui.button(this, "Set new", false);
+        change.setOnClickListener(v -> openPlan(null));
+        wr.addView(keep, Ui.weight(this, 1f, 0));
+        wr.addView(change, Ui.weight(this, 1f, 8));
+        weekCard.addView(wr, Ui.top(this, 12));
+        col.addView(weekCard, Ui.top(this, 16));
+
+        // Today's screen time
+        homeNoAccess = usagePrompt();
+        col.addView(homeNoAccess, Ui.top(this, 16));
+
+        homeSummary = Ui.card(this, Ui.CARD);
+        homeSummary.setPadding(Ui.dp(this, 18), Ui.dp(this, 18), Ui.dp(this, 18), Ui.dp(this, 14));
+        homeRing = new RingView(this);
+        homeSummary.addView(homeRing);
+        homeLegend = new LinearLayout(this);
+        homeLegend.setOrientation(LinearLayout.VERTICAL);
+        homeSummary.addView(homeLegend, Ui.top(this, 12));
+        LinearLayout foot = Ui.row(this);
+        homeUnlocks = Ui.text(this, "", 14, Ui.MUTED, false);
+        foot.addView(homeUnlocks, Ui.weight(this, 1f, 0));
+        foot.addView(Ui.text(this, "Dashboard ›", 14, Ui.INK, true));
+        homeSummary.addView(foot, Ui.top(this, 12));
+        homeSummary.setOnClickListener(v -> openTab(DASH));
+        col.addView(homeSummary, Ui.top(this, 16));
+
+        homeRows = new LinearLayout(this);
+        homeRows.setOrientation(LinearLayout.VERTICAL);
+        col.addView(homeRows, Ui.top(this, 0));
+    }
+
+    private LinearLayout usagePrompt() {
+        LinearLayout c = Ui.card(this, Ui.CARD);
+        c.addView(Ui.text(this, "📊 See your screen time", 17, Ui.INK, true));
+        c.addView(Ui.text(this, "Allow usage access so Focus Guard can show how long you spend on each app. "
+                + "On the next screen, find Focus Guard and turn it on.", 14, Ui.MUTED, false), Ui.top(this, 4));
         Button allow = Ui.button(this, "Allow usage access", false);
         allow.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
-        usageCard.addView(allow, Ui.top(this, 10));
-        col.addView(usageCard, Ui.top(this, 12));
-
-        dashContent = new LinearLayout(this);
-        dashContent.setOrientation(LinearLayout.VERTICAL);
-        col.addView(dashContent, Ui.top(this, 0));
-
-        // Day switcher
-        LinearLayout dayRow = Ui.row(this);
-        prevDay = Ui.chip(this, "‹");
-        nextDay = Ui.chip(this, "›");
-        prevDay.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        nextDay.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        prevDay.setOnClickListener(v -> pickDay(dayIdx - 1));
-        nextDay.setOnClickListener(v -> pickDay(dayIdx + 1));
-        dayLabel = Ui.text(this, "Today", 17, Ui.INK, true);
-        dayLabel.setGravity(Gravity.CENTER);
-        dayRow.addView(prevDay, new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 40)));
-        dayRow.addView(dayLabel, Ui.weight(this, 1f, 8));
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 40));
-        nlp.setMarginStart(Ui.dp(this, 8));
-        dayRow.addView(nextDay, nlp);
-        dashContent.addView(dayRow, Ui.top(this, 12));
-
-        // Ring + legend + stats
-        LinearLayout ringCard = Ui.card(this, Ui.CARD);
-        ring = new RingView(this);
-        ringCard.addView(ring);
-        legend = new LinearLayout(this);
-        legend.setOrientation(LinearLayout.VERTICAL);
-        ringCard.addView(legend, Ui.top(this, 12));
-        LinearLayout stats = Ui.row(this);
-        statUnlocks = stat(stats, 0);
-        statApps = stat(stats, 10);
-        ringCard.addView(stats, Ui.top(this, 14));
-        dashContent.addView(ringCard, Ui.top(this, 10));
-
-        // Week
-        LinearLayout wk = Ui.card(this, Ui.CARD);
-        wk.addView(Ui.text(this, "Last 7 days", 17, Ui.INK, true));
-        weekBars = new BarView(this, 170);
-        weekBars.setOnPick(this::pickDay);
-        wk.addView(weekBars, Ui.top(this, 8));
-        dashContent.addView(wk, Ui.top(this, 12));
-
-        // Apps
-        LinearLayout apps = Ui.card(this, Ui.CARD);
-        apps.addView(Ui.text(this, "Apps", 17, Ui.INK, true));
-        apps.addView(Ui.text(this, "Tap an app for its daily and hourly usage.", 13, Ui.MUTED, false),
-                Ui.top(this, 2));
-        appList = new LinearLayout(this);
-        appList.setOrientation(LinearLayout.VERTICAL);
-        apps.addView(appList, Ui.top(this, 6));
-        dashContent.addView(apps, Ui.top(this, 12));
+        c.addView(allow, Ui.top(this, 12));
+        return c;
     }
 
-    private TextView stat(LinearLayout row, int startDp) {
-        LinearLayout box = Ui.card(this, Ui.PAPER);
-        box.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
-        TextView t = Ui.text(this, "–", 15, Ui.INK, true);
-        box.addView(t);
-        row.addView(box, Ui.weight(this, 1f, startDp));
-        return t;
+    private void refreshHomeRows() {
+        homeRows.removeAllViews();
+        boolean locked = Rules.planLocked(this);
+
+        // Ways to disconnect
+        homeRows.addView(Ui.section(this, "Ways to disconnect"), Ui.top(this, 22));
+        LinearLayout ways = Ui.listCard(this);
+
+        Map<String, Integer> limits = Prefs.getLimits(this);
+        String timersSub;
+        if (limits.isEmpty()) {
+            timersSub = "No timers";
+        } else {
+            int up = 0;
+            for (Map.Entry<String, Integer> e : limits.entrySet()) {
+                if (Prefs.getUsage(this, e.getKey()) >= e.getValue() * Rules.MIN) up++;
+            }
+            timersSub = limits.size() + (limits.size() == 1 ? " app timer" : " app timers")
+                    + (!locked ? " · paused" : up > 0 ? " · " + up + " used up today" : "");
+        }
+        ways.addView(Ui.listRow(this, "⏳", "App timers", timersSub, v -> openPlan("timers")));
+        ways.addView(Ui.divider(this));
+
+        String bedSub = !Prefs.sleepOn(this) ? "Off"
+                : Prefs.clock(this, Prefs.sleepStart(this)) + " – " + Prefs.clock(this, Prefs.sleepEnd(this))
+                + " · " + Prefs.days(Prefs.sleepDays(this)) + (!locked ? " · paused" : "");
+        if (Rules.sleepNow(this)) bedSub = "On now · until " + Prefs.clock(this, Prefs.sleepEnd(this));
+        ways.addView(Ui.listRow(this, "🌙", "Bedtime mode", bedSub, v -> openPlan("bedtime")));
+        ways.addView(Ui.divider(this));
+
+        String focusSub = Rules.focusActive(this)
+                ? "On · " + Prefs.format(Rules.focusLeft(this)) + " left"
+                : Rules.blockedApps(this).size() + " distracting apps · tap to start";
+        ways.addView(Ui.listRow(this, "🎯", "Focus mode", focusSub, v -> openTab(FOCUS)));
+        ways.addView(Ui.divider(this));
+
+        String schSub = !Prefs.schedOn(this) ? "Off"
+                : Prefs.clock(this, Prefs.schedStart(this)) + " – " + Prefs.clock(this, Prefs.schedEnd(this))
+                + " · " + Prefs.days(Prefs.schedDays(this)) + (!locked ? " · paused" : "");
+        ways.addView(Ui.listRow(this, "🗓️", "Focus schedule", schSub, v -> openPlan("schedule")));
+        homeRows.addView(ways, Ui.top(this, 8));
+
+        // Weekly plan status
+        String lockTxt = !Rules.hasPlan(this) ? "Set timers, bedtime and a schedule, then lock them for 7 days."
+                : locked ? "Locked until " + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock"))
+                : "Week ended · choose to keep or change";
+        LinearLayout lockCard = Ui.listCard(this);
+        lockCard.addView(Ui.listRow(this, locked ? "🔒" : "🔓", "Weekly plan", lockTxt, v -> openPlan(null)));
+        homeRows.addView(lockCard, Ui.top(this, 12));
+
+        // Reduce interruptions
+        homeRows.addView(Ui.section(this, "Reduce interruptions"), Ui.top(this, 22));
+        LinearLayout red = Ui.listCard(this);
+        red.addView(Ui.listRow(this, "🔔", "Manage notifications", "Choose which apps can notify you",
+                v -> openSystem("android.settings.ALL_APPS_NOTIFICATION_SETTINGS")));
+        red.addView(Ui.divider(this));
+        String dndSub = Dnd.wanted(this) ? "Turns on at bedtime" : "Silence your phone";
+        red.addView(Ui.listRow(this, "🔕", "Do Not Disturb", dndSub,
+                v -> openSystem("android.settings.ZEN_MODE_SETTINGS")));
+        homeRows.addView(red, Ui.top(this, 8));
     }
 
-    private void loadDashboard() {
+    private void openPlan(String section) {
+        Intent i = new Intent(this, PlanActivity.class);
+        if (section != null) i.putExtra("section", section);
+        startActivity(i);
+    }
+
+    private void openSystem(String action) {
+        try {
+            startActivity(new Intent(action));
+        } catch (Exception e) {
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
+        }
+    }
+
+    private void keepPreviousWeek() {
+        Rules.lockPlan(this);
+        Notifier.update(this, true);
+        Rules.toast(this, "Last week's settings are locked in until "
+                + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock")) + ".");
+        refreshTop();
+        refreshHomeRows();
+    }
+
+    private void askAboutNewWeek() {
+        if (!Rules.weekOver(this) || (weekDialog != null && weekDialog.isShowing())) return;
+        weekDialog = new AlertDialog.Builder(this)
+                .setTitle("Your week has ended")
+                .setMessage("Your app timers, bedtime and focus schedule are paused. Do you want to continue "
+                        + "with last week's settings, or set new restrictions for this week?")
+                .setPositiveButton("Keep previous", (d, w) -> keepPreviousWeek())
+                .setNegativeButton("Set new", (d, w) -> openPlan(null))
+                .setNeutralButton("Later", null)
+                .show();
+    }
+
+    // =====================================================================
+    // Usage data (Home summary + Dashboard)
+    // =====================================================================
+
+    private void loadUsage() {
         boolean access = UsageData.hasAccess(this);
-        usageCard.setVisibility(access ? View.GONE : View.VISIBLE);
+        homeNoAccess.setVisibility(access ? View.GONE : View.VISIBLE);
+        homeSummary.setVisibility(access ? View.VISIBLE : View.GONE);
+        dashNoAccess.setVisibility(access ? View.GONE : View.VISIBLE);
         dashContent.setVisibility(access ? View.VISIBLE : View.GONE);
         if (!access || loading) return;
         loading = true;
@@ -291,9 +400,119 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 loading = false;
                 week = w;
+                showHomeSummary();
                 showDay();
             });
         }).start();
+    }
+
+    private String name(String pkg) {
+        String n = labels.get(pkg);
+        return n == null ? Apps.label(this, pkg) : n;
+    }
+
+    private List<Map.Entry<String, Long>> sortedApps(UsageData.Day d) {
+        List<Map.Entry<String, Long>> s = new ArrayList<>(d.perApp.entrySet());
+        s.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+        return s;
+    }
+
+    private void showHomeSummary() {
+        if (week == null) return;
+        UsageData.Day d = week[6];
+        List<Map.Entry<String, Long>> sorted = sortedApps(d);
+        int top = Math.min(3, sorted.size());
+        long other = 0;
+        for (int i = top; i < sorted.size(); i++) other += sorted.get(i).getValue();
+        long[] vals = new long[top + (other > 0 ? 1 : 0)];
+        int[] cols = new int[vals.length];
+        homeLegend.removeAllViews();
+        for (int i = 0; i < top; i++) {
+            vals[i] = sorted.get(i).getValue();
+            cols[i] = ringColors[i];
+            homeLegend.addView(legendRow(cols[i], name(sorted.get(i).getKey()), Prefs.duration(vals[i])),
+                    Ui.top(this, 4));
+        }
+        if (other > 0) {
+            vals[top] = other;
+            cols[top] = ringColors[5];
+            homeLegend.addView(legendRow(cols[top], "Other apps", Prefs.duration(other)), Ui.top(this, 4));
+        }
+        homeRing.setData(vals, cols, Prefs.duration(d.total), "Today");
+        homeUnlocks.setText(d.unlocks < 0 ? "" : "🔓 " + d.unlocks + " unlocks today");
+    }
+
+    // =====================================================================
+    // Dashboard
+    // =====================================================================
+
+    private void buildDashboard(LinearLayout col) {
+        title(col, "Dashboard", "How you've used your phone this week.");
+
+        dashNoAccess = usagePrompt();
+        col.addView(dashNoAccess, Ui.top(this, 16));
+
+        dashContent = new LinearLayout(this);
+        dashContent.setOrientation(LinearLayout.VERTICAL);
+        col.addView(dashContent, Ui.top(this, 0));
+
+        // What to show
+        LinearLayout metrics = Ui.row(this);
+        String[] mNames = {"Screen time", "Times opened", "Unlocks"};
+        for (int i = 0; i < 3; i++) {
+            final int m = i;
+            Button b = Ui.chip(this, mNames[i]);
+            b.setOnClickListener(v -> {
+                metric = m;
+                showDay();
+            });
+            metrics.addView(b, Ui.weight(this, 1f, i == 0 ? 0 : 6));
+            metricChips.add(b);
+        }
+        dashContent.addView(metrics, Ui.top(this, 16));
+
+        // Day switcher
+        LinearLayout dayRow = Ui.row(this);
+        prevDay = Ui.chip(this, "‹");
+        nextDay = Ui.chip(this, "›");
+        prevDay.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        nextDay.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        prevDay.setOnClickListener(v -> pickDay(dayIdx - 1));
+        nextDay.setOnClickListener(v -> pickDay(dayIdx + 1));
+        dayLabel = Ui.text(this, "Today", 17, Ui.INK, true);
+        dayLabel.setGravity(Gravity.CENTER);
+        dayRow.addView(prevDay, new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 40)));
+        dayRow.addView(dayLabel, Ui.weight(this, 1f, 8));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 40));
+        nlp.setMarginStart(Ui.dp(this, 8));
+        dayRow.addView(nextDay, nlp);
+        dashContent.addView(dayRow, Ui.top(this, 14));
+
+        LinearLayout ringCard = Ui.card(this, Ui.CARD);
+        ring = new RingView(this);
+        ringCard.addView(ring);
+        legend = new LinearLayout(this);
+        legend.setOrientation(LinearLayout.VERTICAL);
+        ringCard.addView(legend, Ui.top(this, 12));
+        dashContent.addView(ringCard, Ui.top(this, 10));
+
+        LinearLayout wk = Ui.card(this, Ui.CARD);
+        wk.addView(Ui.text(this, "Last 7 days", 17, Ui.INK, true));
+        wk.addView(Ui.text(this, "Tap a day to see it.", 13, Ui.MUTED, false), Ui.top(this, 2));
+        weekBars = new BarView(this, 170);
+        weekBars.setOnPick(this::pickDay);
+        wk.addView(weekBars, Ui.top(this, 8));
+        dashContent.addView(wk, Ui.top(this, 12));
+
+        LinearLayout apps = Ui.card(this, Ui.CARD);
+        appsTitle = Ui.text(this, "Apps", 17, Ui.INK, true);
+        apps.addView(appsTitle);
+        apps.addView(Ui.text(this, "Tap an app for its hourly usage and timer.", 13, Ui.MUTED, false),
+                Ui.top(this, 2));
+        appList = new LinearLayout(this);
+        appList.setOrientation(LinearLayout.VERTICAL);
+        apps.addView(appList, Ui.top(this, 6));
+        dashContent.addView(apps, Ui.top(this, 12));
     }
 
     private void pickDay(int i) {
@@ -302,54 +521,78 @@ public class MainActivity extends Activity {
         showDay();
     }
 
+    private long opens(UsageData.Day d, String pkg) {
+        Integer o = d.opens.get(pkg);
+        return o == null ? 0 : o;
+    }
+
+    private long totalOpens(UsageData.Day d) {
+        long t = 0;
+        for (Integer o : d.opens.values()) t += o;
+        return t;
+    }
+
     private void showDay() {
+        for (int i = 0; i < metricChips.size(); i++) Ui.setChip(this, metricChips.get(i), i == metric);
         if (week == null) return;
-        UsageData.Day d = week[dayIdx];
-        String name = dayIdx == 6 ? "Today" : dayIdx == 5 ? "Yesterday"
+        final UsageData.Day d = week[dayIdx];
+        String dayName = dayIdx == 6 ? "Today" : dayIdx == 5 ? "Yesterday"
                 : new SimpleDateFormat("EEEE d MMM", Locale.getDefault()).format(new Date(d.start));
-        dayLabel.setText(name);
+        dayLabel.setText(dayName);
         Ui.enable(prevDay, dayIdx > 0);
         Ui.enable(nextDay, dayIdx < 6);
 
-        List<Map.Entry<String, Long>> sorted = new ArrayList<>(d.perApp.entrySet());
+        // Apps sorted by the chosen measure
+        List<Map.Entry<String, Long>> sorted = new ArrayList<>();
+        for (String p : d.perApp.keySet()) {
+            long v = metric == 1 ? opens(d, p) : d.perApp.get(p);
+            sorted.add(new java.util.AbstractMap.SimpleEntry<>(p, v));
+        }
         sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
 
-        // Ring: top 5 apps + "Other"
-        int top = Math.min(5, sorted.size());
-        long other = 0;
-        for (int i = top; i < sorted.size(); i++) other += sorted.get(i).getValue();
-        long[] vals = new long[top + (other > 0 ? 1 : 0)];
-        int[] cols = new int[vals.length];
+        // Ring
         legend.removeAllViews();
-        for (int i = 0; i < top; i++) {
-            vals[i] = sorted.get(i).getValue();
-            cols[i] = RING_COLORS[i];
-            legend.addView(legendRow(cols[i], name(sorted.get(i).getKey()), vals[i]), Ui.top(this, 4));
+        if (metric == 2) {
+            long u = Math.max(0, d.unlocks);
+            ring.setData(new long[]{u > 0 ? 1 : 0}, new int[]{ringColors[1]},
+                    d.unlocks < 0 ? "–" : String.valueOf(u), "unlocks · " + dayName.toLowerCase(Locale.getDefault()));
+        } else {
+            int top = Math.min(5, sorted.size());
+            long other = 0;
+            for (int i = top; i < sorted.size(); i++) other += sorted.get(i).getValue();
+            long[] vals = new long[top + (other > 0 ? 1 : 0)];
+            int[] cols = new int[vals.length];
+            for (int i = 0; i < top; i++) {
+                vals[i] = sorted.get(i).getValue();
+                cols[i] = ringColors[i];
+                legend.addView(legendRow(cols[i], name(sorted.get(i).getKey()), fmt(vals[i])), Ui.top(this, 4));
+            }
+            if (other > 0) {
+                vals[top] = other;
+                cols[top] = ringColors[5];
+                legend.addView(legendRow(cols[top], "Other apps", fmt(other)), Ui.top(this, 4));
+            }
+            String center = metric == 0 ? Prefs.duration(d.total) : String.valueOf(totalOpens(d));
+            String sub = metric == 0 ? dayName : "times opened · " + dayName.toLowerCase(Locale.getDefault());
+            ring.setData(vals, cols, center, sub);
         }
-        if (other > 0) {
-            vals[top] = other;
-            cols[top] = RING_COLORS[5];
-            legend.addView(legendRow(cols[top], "Other apps", other), Ui.top(this, 4));
-        }
-        ring.setData(vals, cols, Prefs.duration(d.total), name);
-        statUnlocks.setText(d.unlocks < 0 ? "🔓 –" : "🔓 " + d.unlocks + " unlocks");
-        statApps.setText("📱 " + sorted.size() + " apps used");
 
         // Week bars
         long[] wv = new long[7];
         String[] wl = new String[7];
         SimpleDateFormat f = new SimpleDateFormat("EEE", Locale.getDefault());
         for (int i = 0; i < 7; i++) {
-            wv[i] = week[i].total;
+            wv[i] = metric == 0 ? week[i].total : metric == 1 ? totalOpens(week[i]) : Math.max(0, week[i].unlocks);
             wl[i] = i == 6 ? "Today" : f.format(new Date(week[i].start));
         }
+        weekBars.setFormat(metric == 0 ? Prefs::duration : v -> String.valueOf(v));
         weekBars.setData(wv, wl, dayIdx);
 
         // App list
+        appsTitle.setText(metric == 1 ? "Apps by times opened" : "Apps by screen time");
         appList.removeAllViews();
         if (sorted.isEmpty()) {
-            appList.addView(Ui.text(this, "No app usage recorded for this day.", 14, Ui.MUTED, false),
-                    Ui.top(this, 6));
+            appList.addView(Ui.text(this, "Nothing recorded for this day.", 14, Ui.MUTED, false), Ui.top(this, 6));
         }
         long max = sorted.isEmpty() ? 1 : Math.max(1, sorted.get(0).getValue());
         Map<String, Integer> limits = Rules.activeLimits(this);
@@ -358,27 +601,26 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String name(String pkg) {
-        String n = labels.get(pkg);
-        return n == null ? Apps.label(this, pkg) : n;
+    private String fmt(long v) {
+        return metric == 0 ? Prefs.duration(v) : v + (v == 1 ? " time" : " times");
     }
 
-    private View legendRow(int color, String label, long ms) {
+    private View legendRow(int color, String label, String value) {
         LinearLayout row = Ui.row(this);
         View dot = new View(this);
-        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
-        g.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
         g.setColor(color);
         dot.setBackground(g);
         row.addView(dot, new LinearLayout.LayoutParams(Ui.dp(this, 12), Ui.dp(this, 12)));
         row.addView(Ui.text(this, label, 15, Ui.INK, false), Ui.weight(this, 1f, 10));
-        row.addView(Ui.text(this, Prefs.duration(ms), 15, Ui.MUTED, false));
+        row.addView(Ui.text(this, value, 15, Ui.MUTED, false));
         return row;
     }
 
-    private View appRow(String pkg, long ms, long max, Integer limit) {
+    private View appRow(String pkg, long value, long max, Integer limit) {
         LinearLayout row = Ui.row(this);
-        row.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8));
+        row.setPadding(0, Ui.dp(this, 9), 0, Ui.dp(this, 9));
         ImageView icon = new ImageView(this);
         Drawable d = icons.get(pkg);
         if (d != null) icon.setImageDrawable(d);
@@ -388,19 +630,9 @@ public class MainActivity extends Activity {
         mid.setOrientation(LinearLayout.VERTICAL);
         LinearLayout top = Ui.row(this);
         top.addView(Ui.text(this, name(pkg), 16, Ui.INK, false), Ui.weight(this, 1f, 0));
-        top.addView(Ui.text(this, Prefs.duration(ms), 14, Ui.MUTED, false));
+        top.addView(Ui.text(this, fmt(value), 14, Ui.MUTED, false));
         mid.addView(top);
-
-        LinearLayout track = new LinearLayout(this);
-        track.setBackground(Ui.round(this, Ui.TRACK, 4));
-        View fill = new View(this);
-        fill.setBackground(Ui.round(this, "#5E9C8A", 4));
-        float frac = Math.max(0.02f, ms / (float) max);
-        track.addView(fill, new LinearLayout.LayoutParams(0, Ui.dp(this, 6), frac));
-        View rest = new View(this);
-        track.addView(rest, new LinearLayout.LayoutParams(0, Ui.dp(this, 6), 1f - frac + 0.0001f));
-        mid.addView(track, Ui.top(this, 6));
-
+        mid.addView(progressBar(value / (float) max, "#5E9C8A"), Ui.top(this, 6));
         if (limit != null) {
             mid.addView(Ui.text(this, "⏳ Timer: " + limit + " min a day", 12, Ui.MUTED, false), Ui.top(this, 4));
         }
@@ -409,55 +641,71 @@ public class MainActivity extends Activity {
         return row;
     }
 
+    private View progressBar(float frac, String color) {
+        frac = Math.max(0.02f, Math.min(1f, frac));
+        LinearLayout track = new LinearLayout(this);
+        track.setBackground(Ui.round(this, Ui.TRACK, 4));
+        View fill = new View(this);
+        fill.setBackground(Ui.round(this, color, 4));
+        track.addView(fill, new LinearLayout.LayoutParams(0, Ui.dp(this, 6), frac));
+        track.addView(new View(this), new LinearLayout.LayoutParams(0, Ui.dp(this, 6), 1f - frac + 0.0001f));
+        return track;
+    }
+
     // =====================================================================
     // Focus
     // =====================================================================
 
     private void buildFocus(LinearLayout col) {
-        col.addView(Ui.text(this, "Focus", 28, Ui.INK, true));
+        title(col, "Focus mode", "Pause your distracting apps while you study.");
 
-        LinearLayout statusCard = Ui.card(this, Ui.DARK);
-        status = Ui.text(this, "", 20, Ui.LIGHT, true);
-        statusSub = Ui.text(this, "", 14, Ui.SOFT, false);
-        statusCard.addView(status);
-        statusCard.addView(statusSub, Ui.top(this, 4));
-        col.addView(statusCard, Ui.top(this, 12));
+        LinearLayout card = Ui.card(this, Ui.CARD);
+        card.setPadding(Ui.dp(this, 18), Ui.dp(this, 22), Ui.dp(this, 18), Ui.dp(this, 18));
+        dial = new FocusDial(this);
+        dial.setOnClickListener(v -> askCustomMinutes());
+        card.addView(dial);
 
-        LinearLayout focusCard = Ui.card(this, Ui.CARD);
-        focusCard.addView(Ui.text(this, "Focus time (minutes)", 17, Ui.INK, true));
-        LinearLayout chipRow = Ui.row(this);
+        LinearLayout adjust = Ui.row(this);
+        minusBtn = roundBtn("−");
+        minusBtn.setOnClickListener(v -> setMinutes(Prefs.getMinutes(this) - 5));
+        plusBtn = roundBtn("+");
+        plusBtn.setOnClickListener(v -> setMinutes(Prefs.getMinutes(this) + 5));
+        adjust.addView(minusBtn, new LinearLayout.LayoutParams(Ui.dp(this, 44), Ui.dp(this, 44)));
         for (int i = 0; i < PRESETS.length; i++) {
             final int p = PRESETS[i];
             Button b = Ui.chip(this, String.valueOf(p));
-            b.setOnClickListener(v -> minutesInput.setText(String.valueOf(p)));
-            chipRow.addView(b, Ui.weight(this, 1f, i == 0 ? 0 : 6));
-            chips.add(b);
+            b.setOnClickListener(v -> setMinutes(p));
+            adjust.addView(b, Ui.weight(this, 1f, 6));
+            presetChips.add(b);
         }
-        focusCard.addView(chipRow, Ui.top(this, 10));
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(Ui.dp(this, 44), Ui.dp(this, 44));
+        plp.setMarginStart(Ui.dp(this, 6));
+        adjust.addView(plusBtn, plp);
+        card.addView(adjust, Ui.top(this, 18));
 
-        LinearLayout startRow = Ui.row(this);
-        minutesInput = new EditText(this);
-        minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        minutesInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        minutesInput.setGravity(Gravity.CENTER);
-        minutesInput.setText(String.valueOf(Prefs.getMinutes(this)));
-        Ui.styleInput(this, minutesInput);
-        minutesInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void afterTextChanged(Editable s) { highlightChips(); }
-        });
         startBtn = Ui.button(this, "Start focus", true);
         startBtn.setOnClickListener(v -> confirmStart());
-        startRow.addView(minutesInput, new LinearLayout.LayoutParams(Ui.dp(this, 88),
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        startRow.addView(startBtn, Ui.weight(this, 1f, 12));
-        focusCard.addView(startRow, Ui.top(this, 12));
+        card.addView(startBtn, Ui.top(this, 16));
+        focusNote = Ui.text(this, "", 13, Ui.MUTED, false);
+        focusNote.setGravity(Gravity.CENTER);
+        card.addView(focusNote, Ui.top(this, 10));
+        col.addView(card, Ui.top(this, 16));
 
+        // Distracting apps
+        col.addView(Ui.section(this, "Distracting apps"), Ui.top(this, 22));
+        LinearLayout dCard = Ui.card(this, Ui.CARD);
+        distractBox = new LinearLayout(this);
+        distractBox.setOrientation(LinearLayout.VERTICAL);
+        dCard.addView(distractBox);
+        dCard.setOnClickListener(v -> startActivity(new Intent(this, BlockListActivity.class)));
+        col.addView(dCard, Ui.top(this, 8));
+
+        // Options
+        col.addView(Ui.section(this, "Options"), Ui.top(this, 22));
+        LinearLayout opts = Ui.listCard(this);
+        LinearLayout grayRow = Ui.listRow(this, "◐", "Grayscale distracting apps",
+                "If you open one during focus, the screen turns gray", null);
         grayFocus = new Switch(this);
-        grayFocus.setText("Grayscale screen during focus");
-        grayFocus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        grayFocus.setTextColor(Color.parseColor(Ui.INK));
         grayFocus.setChecked(Gray.focusWanted(this));
         grayFocus.setOnCheckedChangeListener((b, on) -> {
             Prefs.putBool(this, "gray_focus", on);
@@ -465,228 +713,162 @@ public class MainActivity extends Activity {
                 Rules.toast(this, "Grayscale needs a one-time setup. See the Settings tab.");
             }
         });
-        focusCard.addView(grayFocus, Ui.top(this, 12));
-        col.addView(focusCard, Ui.top(this, 12));
-
-        LinearLayout listCard = Ui.card(this, Ui.CARD);
-        listCard.addView(Ui.text(this, "Distracting apps & websites", 17, Ui.INK, true));
-        listCard.addView(Ui.text(this, "Blocked during focus time and bedtime.", 14, Ui.MUTED, false),
-                Ui.top(this, 2));
-        listSummary = Ui.text(this, "", 15, Ui.INK, false);
-        listCard.addView(listSummary, Ui.top(this, 8));
-        Button editList = Ui.button(this, "Edit list", false);
-        editList.setOnClickListener(v -> startActivity(new Intent(this, BlockListActivity.class)));
-        listCard.addView(editList, Ui.top(this, 12));
-        col.addView(listCard, Ui.top(this, 12));
+        grayRow.addView(grayFocus);
+        opts.addView(grayRow);
+        opts.addView(Ui.divider(this));
+        focusRows = new LinearLayout(this);
+        focusRows.setOrientation(LinearLayout.VERTICAL);
+        opts.addView(focusRows);
+        col.addView(opts, Ui.top(this, 8));
 
         LinearLayout tips = Ui.card(this, Ui.CARD);
-        tips.addView(Ui.text(this, "Start focus without opening the app", 17, Ui.INK, true));
+        tips.addView(Ui.text(this, "Start focus without opening the app", 15, Ui.INK, true));
         tips.addView(Ui.text(this,
                 "• Notification bar: tap 30, 45 or 60 min on the Focus Guard notification.\n"
-                        + "• Quick Settings: swipe down twice, tap ✏️ edit, and drag the \"Focus\" tile "
-                        + "into your tiles.\n"
-                        + "• Home screen: long-press the Focus Guard icon and pick a time.\n"
-                        + "• Or set a Focus schedule in the Limits tab.",
-                14, Ui.INK, false), Ui.top(this, 6));
+                        + "• Quick Settings: swipe down twice, tap ✏️, and add the \"Focus\" tile.\n"
+                        + "• Home screen: long-press the Focus Guard icon.",
+                13, Ui.MUTED, false), Ui.top(this, 6));
         col.addView(tips, Ui.top(this, 12));
     }
 
-    private void refreshStatus() {
-        accCard.setVisibility(Rules.blockerOn(this) ? View.GONE : View.VISIBLE);
-        weekCard.setVisibility(Rules.weekOver(this) ? View.VISIBLE : View.GONE);
-
-        boolean focus = Rules.focusActive(this);
-        long now = System.currentTimeMillis();
-        if (Rules.emergencyOn(this)) {
-            status.setText("Emergency time · " + Prefs.format(Prefs.getLong(this, "em_until") - now) + " left");
-            statusSub.setText("Blocking comes back on automatically.");
-        } else if (focus) {
-            status.setText("Focus is ON · " + Prefs.format(Rules.focusLeft(this)) + " left");
-            statusSub.setText(Rules.scheduleNow(this) && !Rules.focusOn(this)
-                    ? "Your focus schedule is running."
-                    : "Blocked apps, websites and settings are locked until it ends.");
-        } else if (Rules.sleepNow(this)) {
-            status.setText("Bedtime 🌙");
-            statusSub.setText("Distracting apps are blocked until " + Prefs.clock(this, Prefs.sleepEnd(this)) + ".");
-        } else {
-            status.setText("Ready to focus");
-            statusSub.setText("Pick a time and tap Start focus.");
-        }
-
-        startBtn.setText(focus ? "Focus is on" : "Start focus");
-        Ui.enable(startBtn, !focus);
-        Ui.enable(minutesInput, !focus);
-        Ui.enable(grayFocus, !focus);
-        for (Button b : chips) Ui.enable(b, !focus);
-        highlightChips();
-
-        int apps = Rules.blockedApps(this).size();
-        int sites = Rules.blockedSites(this).size();
-        listSummary.setText(apps + (apps == 1 ? " app" : " apps") + " · "
-                + sites + (sites == 1 ? " website" : " websites"));
+    private Button roundBtn(String s) {
+        Button b = Ui.chip(this, s);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        b.setPadding(0, 0, 0, 0);
+        b.setBackground(Ui.round(this, Ui.PAPER, 22));
+        return b;
     }
 
-    private void highlightChips() {
-        String v = minutesInput.getText().toString().trim();
-        for (int i = 0; i < chips.size(); i++) {
-            Ui.setChip(this, chips.get(i), v.equals(String.valueOf(PRESETS[i])));
-        }
+    private void setMinutes(int m) {
+        if (Rules.focusActive(this)) return;
+        Prefs.setMinutes(this, Math.max(5, Math.min(720, m)));
+        refreshFocus();
     }
 
-    private AlertDialog weekDialog;
-
-    /** Shown whenever the app is opened after the week has ended, until you choose. */
-    private void askAboutNewWeek() {
-        if (!Rules.weekOver(this) || (weekDialog != null && weekDialog.isShowing())) return;
-        weekDialog = new AlertDialog.Builder(this)
-                .setTitle("Your week has ended")
-                .setMessage("Your app timers, bedtime and focus schedule are paused. Do you want to continue "
-                        + "with last week's settings, or set new restrictions for this week?")
-                .setPositiveButton("Keep previous", (d, w) -> keepPreviousWeek())
-                .setNegativeButton("Set new", (d, w) -> startActivity(new Intent(this, PlanActivity.class)))
-                .setNeutralButton("Later", null)
+    private void askCustomMinutes() {
+        if (Rules.focusActive(this)) return;
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setGravity(Gravity.CENTER);
+        input.setText(String.valueOf(Prefs.getMinutes(this)));
+        input.setSelectAllOnFocus(true);
+        Ui.styleInput(this, input);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setPadding(Ui.dp(this, 20), Ui.dp(this, 8), Ui.dp(this, 20), 0);
+        wrap.addView(input, Ui.top(this, 0));
+        new AlertDialog.Builder(this)
+                .setTitle("Focus for how many minutes?")
+                .setView(wrap)
+                .setPositiveButton("OK", (d, w) -> {
+                    try {
+                        int m = Integer.parseInt(input.getText().toString().trim());
+                        if (m >= 1 && m <= 720) {
+                            Prefs.setMinutes(this, m);
+                            refreshFocus();
+                        } else {
+                            Rules.toast(this, "Choose between 1 and 720 minutes.");
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
+        input.requestFocus();
     }
 
-    private void keepPreviousWeek() {
-        Rules.lockPlan(this);
-        Notifier.update(this, true);
-        Rules.toast(this, "Last week's settings are locked in until "
-                + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock")) + ".");
-        refreshPlan();
-        refreshStatus();
+    private void refreshFocus() {
+        boolean on = Rules.focusActive(this);
+        int mins = Prefs.getMinutes(this);
+        if (Rules.emergencyOn(this) && on) {
+            dial.setState(Rules.focusProgress(this), true,
+                    Prefs.format(Rules.focusLeft(this)), "emergency time on");
+        } else if (on) {
+            dial.setState(Rules.focusProgress(this), true, Prefs.format(Rules.focusLeft(this)),
+                    "until " + android.text.format.DateFormat.getTimeFormat(this)
+                            .format(new Date(Rules.focusEndsAt(this))));
+        } else {
+            dial.setState(1f, false, mins >= 60 && mins % 60 == 0 ? (mins / 60) + " h" : mins + " min",
+                    "tap to type a time");
+        }
+        startBtn.setText(on ? "Focus is on" : "Start focus");
+        Ui.enable(startBtn, !on);
+        Ui.enable(minusBtn, !on);
+        Ui.enable(plusBtn, !on);
+        Ui.enable(grayFocus, !on);
+        for (int i = 0; i < presetChips.size(); i++) {
+            Ui.setChip(this, presetChips.get(i), mins == PRESETS[i]);
+            Ui.enable(presetChips.get(i), !on);
+        }
+        if (on) {
+            focusNote.setText(Rules.scheduleNow(this) && !Rules.focusOn(this)
+                    ? "Your focus schedule is running. 2 emergency minutes every 20 minutes."
+                    : "Distracting apps, websites and settings are locked. 2 emergency minutes every 20 minutes.");
+        } else if (Rules.sleepNow(this)) {
+            focusNote.setText("🌙 Bedtime is on until " + Prefs.clock(this, Prefs.sleepEnd(this)) + ".");
+        } else {
+            focusNote.setText("Once started, focus can't be stopped until the time is up.");
+        }
+    }
+
+    private void refreshFocusLists() {
+        // Distracting apps preview
+        distractBox.removeAllViews();
+        LinearLayout head = Ui.row(this);
+        Set<String> apps = Rules.blockedApps(this);
+        Set<String> sites = Rules.blockedSites(this);
+        head.addView(Ui.text(this, apps.size() + (apps.size() == 1 ? " app" : " apps") + " · "
+                + sites.size() + (sites.size() == 1 ? " website" : " websites"), 16, Ui.INK, true),
+                Ui.weight(this, 1f, 0));
+        head.addView(Ui.text(this, "Edit ›", 14, Ui.INK, true));
+        distractBox.addView(head);
+        if (apps.isEmpty()) {
+            distractBox.addView(Ui.text(this, "Choose the apps and websites that distract you.", 13,
+                    Ui.MUTED, false), Ui.top(this, 4));
+        } else {
+            LinearLayout iconsRow = Ui.row(this);
+            int shown = 0;
+            for (String p : apps) {
+                if (shown == 7) break;
+                ImageView iv = new ImageView(this);
+                try {
+                    iv.setImageDrawable(getPackageManager().getApplicationIcon(p));
+                } catch (Exception e) {
+                    continue;
+                }
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Ui.dp(this, 34), Ui.dp(this, 34));
+                lp.setMarginEnd(Ui.dp(this, 8));
+                iconsRow.addView(iv, lp);
+                shown++;
+            }
+            if (apps.size() > shown) {
+                iconsRow.addView(Ui.text(this, "+" + (apps.size() - shown), 14, Ui.MUTED, true));
+            }
+            distractBox.addView(iconsRow, Ui.top(this, 10));
+        }
+
+        // Schedule row
+        focusRows.removeAllViews();
+        String schSub = !Prefs.schedOn(this) ? "Off · turn focus on automatically"
+                : Prefs.clock(this, Prefs.schedStart(this)) + " – " + Prefs.clock(this, Prefs.schedEnd(this))
+                + " · " + Prefs.days(Prefs.schedDays(this));
+        focusRows.addView(Ui.listRow(this, "🗓️", "Focus schedule", schSub, v -> openPlan("schedule")));
     }
 
     private void confirmStart() {
         if (Rules.focusActive(this)) return;
-        int minutes;
-        try {
-            minutes = Integer.parseInt(minutesInput.getText().toString().trim());
-        } catch (NumberFormatException e) {
-            minutes = 0;
-        }
-        if (minutes < 1 || minutes > 720) {
-            Rules.toast(this, "Enter a focus time between 1 and 720 minutes.");
-            return;
-        }
-        Prefs.setMinutes(this, minutes);
-        final int mins = minutes;
+        final int mins = Prefs.getMinutes(this);
         new AlertDialog.Builder(this)
                 .setTitle("Start a " + mins + "-minute focus?")
-                .setMessage("Until it ends you won't be able to open the blocked apps or websites, "
+                .setMessage("Until it ends you won't be able to open your distracting apps or websites, "
                         + "change your list, or switch Focus Guard off. You'll get 2 emergency minutes "
                         + "every 20 minutes.")
                 .setPositiveButton("Start", (d, w) -> {
                     Rules.startFocus(this, mins);
-                    refreshStatus();
+                    refreshFocus();
+                    refreshHomeRows();
                 })
                 .setNegativeButton("Not yet", null)
                 .show();
-    }
-
-    // =====================================================================
-    // Limits
-    // =====================================================================
-
-    private void buildLimits(LinearLayout col) {
-        col.addView(Ui.text(this, "Limits & bedtime", 28, Ui.INK, true));
-        col.addView(Ui.text(this, "Your weekly plan: app timers, bedtime and focus schedule.", 14,
-                Ui.MUTED, false), Ui.top(this, 2));
-
-        weekCard = Ui.card(this, Ui.WARN);
-        weekCard.addView(Ui.text(this, "Your week has ended", 16, Ui.INK, true));
-        weekCard.addView(Ui.text(this, "Your app timers, bedtime and focus schedule are paused. Do you want "
-                + "to continue with last week's settings, or set new restrictions for this week?",
-                14, Ui.INK, false), Ui.top(this, 6));
-        LinearLayout weekRow = Ui.row(this);
-        Button keep = Ui.button(this, "Keep previous", false);
-        keep.setOnClickListener(v -> keepPreviousWeek());
-        Button change = Ui.button(this, "Set new", false);
-        change.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
-        weekRow.addView(keep, Ui.weight(this, 1f, 0));
-        weekRow.addView(change, Ui.weight(this, 1f, 8));
-        weekCard.addView(weekRow, Ui.top(this, 12));
-        col.addView(weekCard, Ui.top(this, 12));
-
-        planBody = new LinearLayout(this);
-        planBody.setOrientation(LinearLayout.VERTICAL);
-        col.addView(planBody, Ui.top(this, 0));
-    }
-
-    private void refreshPlan() {
-        planBody.removeAllViews();
-        boolean locked = Rules.planLocked(this);
-
-        // Lock state + edit button
-        LinearLayout lockCard = Ui.card(this, Ui.CARD);
-        if (!Rules.hasPlan(this)) {
-            lockCard.addView(Ui.text(this, "No plan yet", 16, Ui.INK, true));
-            lockCard.addView(Ui.text(this, "Give apps like Facebook or TikTok a daily timer, set a bedtime, "
-                    + "and schedule your study hours. Once saved, the plan is locked for 7 days.",
-                    14, Ui.MUTED, false), Ui.top(this, 4));
-        } else {
-            lockCard.addView(Ui.text(this, locked
-                    ? "🔒 Locked until " + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock"))
-                    : "⏸ Paused: last week's plan is shown below. Keep it or set a new one.",
-                    15, Ui.INK, true));
-        }
-        Button open = Ui.button(this, !Rules.hasPlan(this) ? "Set up plan" : locked ? "View plan" : "Edit plan", false);
-        open.setOnClickListener(v -> startActivity(new Intent(this, PlanActivity.class)));
-        lockCard.addView(open, Ui.top(this, 12));
-        planBody.addView(lockCard, Ui.top(this, 12));
-
-        // App timers
-        Map<String, Integer> limits = Prefs.getLimits(this);
-        LinearLayout timers = Ui.card(this, Ui.CARD);
-        timers.addView(Ui.text(this, "⏳ App timers", 17, Ui.INK, true));
-        if (limits.isEmpty()) {
-            timers.addView(Ui.text(this, "None", 14, Ui.MUTED, false), Ui.top(this, 4));
-        }
-        for (Map.Entry<String, Integer> e : limits.entrySet()) {
-            long used = Prefs.getUsage(this, e.getKey());
-            long lim = e.getValue() * Rules.MIN;
-            boolean done = used >= lim;
-            LinearLayout r = new LinearLayout(this);
-            r.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout top = Ui.row(this);
-            top.addView(Ui.text(this, Apps.label(this, e.getKey()), 15, Ui.INK, false), Ui.weight(this, 1f, 0));
-            top.addView(Ui.text(this, !locked ? e.getValue() + " min · paused"
-                            : done ? "Time's up" : Prefs.duration(lim - used) + " left",
-                    14, done && locked ? Ui.RED : Ui.MUTED, done && locked));
-            r.addView(top);
-            LinearLayout track = new LinearLayout(this);
-            track.setBackground(Ui.round(this, Ui.TRACK, 4));
-            float frac = Math.min(1f, Math.max(0.02f, used / (float) lim));
-            View fill = new View(this);
-            fill.setBackground(Ui.round(this, done ? Ui.RED : Ui.GOLD, 4));
-            track.addView(fill, new LinearLayout.LayoutParams(0, Ui.dp(this, 6), frac));
-            track.addView(new View(this), new LinearLayout.LayoutParams(0, Ui.dp(this, 6), 1f - frac + 0.0001f));
-            r.addView(track, Ui.top(this, 6));
-            timers.addView(r, Ui.top(this, 10));
-        }
-        planBody.addView(timers, Ui.top(this, 12));
-
-        // Bedtime
-        LinearLayout bed = Ui.card(this, Ui.CARD);
-        bed.addView(Ui.text(this, "🌙 Bedtime", 17, Ui.INK, true));
-        String bedTxt = Prefs.sleepOn(this)
-                ? Prefs.clock(this, Prefs.sleepStart(this)) + " – " + Prefs.clock(this, Prefs.sleepEnd(this))
-                + " · " + Prefs.days(Prefs.sleepDays(this))
-                + (Gray.sleepWanted(this) ? "\nGrayscale on" : "")
-                + (Dnd.wanted(this) ? (Gray.sleepWanted(this) ? " · " : "\n") + "Do Not Disturb on" : "")
-                : "Off";
-        bed.addView(Ui.text(this, bedTxt, 14, Ui.MUTED, false), Ui.top(this, 4));
-        planBody.addView(bed, Ui.top(this, 12));
-
-        // Focus schedule
-        LinearLayout sch = Ui.card(this, Ui.CARD);
-        sch.addView(Ui.text(this, "🎯 Focus schedule", 17, Ui.INK, true));
-        String schTxt = Prefs.schedOn(this)
-                ? Prefs.clock(this, Prefs.schedStart(this)) + " – " + Prefs.clock(this, Prefs.schedEnd(this))
-                + " · " + Prefs.days(Prefs.schedDays(this))
-                : "Off";
-        sch.addView(Ui.text(this, schTxt, 14, Ui.MUTED, false), Ui.top(this, 4));
-        planBody.addView(sch, Ui.top(this, 12));
     }
 
     // =====================================================================
@@ -694,7 +876,7 @@ public class MainActivity extends Activity {
     // =====================================================================
 
     private void buildSettings(LinearLayout col) {
-        col.addView(Ui.text(this, "Settings", 28, Ui.INK, true));
+        title(col, "Settings", "Permissions, appearance and updates.");
         settingsBody = new LinearLayout(this);
         settingsBody.setOrientation(LinearLayout.VERTICAL);
         col.addView(settingsBody, Ui.top(this, 0));
@@ -703,8 +885,8 @@ public class MainActivity extends Activity {
     private void refreshSettings() {
         settingsBody.removeAllViews();
 
+        settingsBody.addView(Ui.section(this, "Appearance"), Ui.top(this, 20));
         LinearLayout look = Ui.card(this, Ui.CARD);
-        look.addView(Ui.text(this, "Appearance", 17, Ui.INK, true));
         LinearLayout themeRow = Ui.row(this);
         String[] names = {"Phone setting", "Light", "Dark"};
         for (int i = 0; i < 3; i++) {
@@ -717,31 +899,34 @@ public class MainActivity extends Activity {
             });
             themeRow.addView(b, Ui.weight(this, 1f, i == 0 ? 0 : 6));
         }
-        look.addView(themeRow, Ui.top(this, 10));
-        settingsBody.addView(look, Ui.top(this, 12));
+        look.addView(themeRow);
+        settingsBody.addView(look, Ui.top(this, 8));
 
-        LinearLayout perms = Ui.card(this, Ui.CARD);
-        perms.addView(Ui.text(this, "Permissions", 17, Ui.INK, true));
-        permRow(perms, "Blocker (Accessibility)", "Needed to block apps and websites.",
-                Rules.blockerOn(this), "Turn on",
+        settingsBody.addView(Ui.section(this, "Permissions"), Ui.top(this, 22));
+        LinearLayout perms = Ui.listCard(this);
+        permRow(perms, "Blocker (Accessibility)", "Blocks apps and websites", Rules.blockerOn(this),
                 () -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        permRow(perms, "Usage access", "Needed for the screen-time dashboard.",
-                UsageData.hasAccess(this), "Allow",
+        perms.addView(Ui.divider(this));
+        permRow(perms, "Usage access", "Screen time on the dashboard", UsageData.hasAccess(this),
                 () -> startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
-        permRow(perms, "Notifications", "Start focus from your notification bar.",
-                !needsNotifications(), "Allow", this::askNotifications);
-        permRow(perms, "Do Not Disturb", "Turn on Do Not Disturb at bedtime.",
-                Dnd.canControl(this), "Allow",
+        perms.addView(Ui.divider(this));
+        permRow(perms, "Notifications", "Start focus from the notification bar", !needsNotifications(),
+                this::askNotifications);
+        perms.addView(Ui.divider(this));
+        permRow(perms, "Do Not Disturb", "Silence the phone at bedtime", Dnd.canControl(this),
                 () -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));
-        permRow(perms, "Grayscale", "Turn the screen gray at bedtime or during focus.",
-                Gray.canControl(this), null, null);
-        perms.addView(Ui.text(this, "If the Accessibility switch is greyed out: open App info, tap ⋮ (top right), "
-                + "then \"Allow restricted settings\", and try again.", 12, Ui.MUTED, false), Ui.top(this, 12));
+        perms.addView(Ui.divider(this));
+        permRow(perms, "Grayscale", "Gray screen at bedtime and for distracting apps", Gray.canControl(this), null);
+        settingsBody.addView(perms, Ui.top(this, 8));
+
+        LinearLayout help = Ui.card(this, Ui.CARD);
+        help.addView(Ui.text(this, "If the Accessibility switch is greyed out: open App info, tap ⋮ (top right), "
+                + "then \"Allow restricted settings\", and try again.", 13, Ui.MUTED, false));
         Button info = Ui.button(this, "Open App info", false);
         info.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 .setData(Uri.parse("package:" + getPackageName()))));
-        perms.addView(info, Ui.top(this, 8));
-        settingsBody.addView(perms, Ui.top(this, 12));
+        help.addView(info, Ui.top(this, 10));
+        settingsBody.addView(help, Ui.top(this, 10));
 
         if (!Gray.canControl(this)) {
             LinearLayout gray = Ui.card(this, Ui.WARN);
@@ -764,26 +949,17 @@ public class MainActivity extends Activity {
             settingsBody.addView(gray, Ui.top(this, 12));
         }
 
-        LinearLayout upd = Ui.card(this, Ui.CARD);
-        upd.addView(Ui.text(this, "App updates", 17, Ui.INK, true));
-        upd.addView(Ui.text(this, "Installed: build " + Updater.installedBuild(this), 14, Ui.MUTED, false),
-                Ui.top(this, 2));
-        Button check = Ui.button(this, "Check for updates", false);
-        check.setOnClickListener(v -> Updater.check(this));
-        upd.addView(check, Ui.top(this, 12));
-        settingsBody.addView(upd, Ui.top(this, 12));
+        settingsBody.addView(Ui.section(this, "App"), Ui.top(this, 22));
+        LinearLayout app = Ui.listCard(this);
+        app.addView(Ui.listRow(this, "⬇️", "Check for updates",
+                "Installed: build " + Updater.installedBuild(this), v -> Updater.check(this)));
+        settingsBody.addView(app, Ui.top(this, 8));
     }
 
-    private void permRow(LinearLayout card, String title, String desc, boolean ok, String btn, Runnable action) {
-        LinearLayout row = Ui.row(this);
-        row.setPadding(0, Ui.dp(this, 10), 0, 0);
-        LinearLayout txt = new LinearLayout(this);
-        txt.setOrientation(LinearLayout.VERTICAL);
-        txt.addView(Ui.text(this, (ok ? "✅ " : "⚪ ") + title, 15, Ui.INK, true));
-        txt.addView(Ui.text(this, desc, 13, Ui.MUTED, false));
-        row.addView(txt, Ui.weight(this, 1f, 0));
-        if (!ok && btn != null) {
-            Button b = Ui.chip(this, btn);
+    private void permRow(LinearLayout card, String title, String desc, boolean ok, Runnable action) {
+        LinearLayout row = Ui.listRow(this, ok ? "✅" : "⚪", title, desc, null);
+        if (!ok && action != null) {
+            Button b = Ui.chip(this, "Allow");
             Ui.setChip(this, b, true);
             b.setOnClickListener(v -> action.run());
             row.addView(b);
@@ -792,8 +968,13 @@ public class MainActivity extends Activity {
     }
 
     // =====================================================================
-    // Lifecycle & permissions
+    // Lifecycle
     // =====================================================================
+
+    private void refreshTop() {
+        accCard.setVisibility(Rules.blockerOn(this) ? View.GONE : View.VISIBLE);
+        weekCard.setVisibility(Rules.weekOver(this) ? View.VISIBLE : View.GONE);
+    }
 
     @Override
     protected void onResume() {
@@ -803,10 +984,12 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{NOTIF_PERM}, 7);
         }
         Notifier.update(this, true);
-        refreshPlan();
+        refreshTop();
+        refreshHomeRows();
+        refreshFocus();
+        refreshFocusLists();
         refreshSettings();
-        refreshStatus();
-        if (tab == 0) loadDashboard();
+        if (tab == HOME || tab == DASH) loadUsage();
         askAboutNewWeek();
         handler.removeCallbacks(tick);
         handler.postDelayed(tick, 1000L);
