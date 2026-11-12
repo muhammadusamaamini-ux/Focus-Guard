@@ -135,6 +135,13 @@ public class AppDetailActivity extends Activity {
         if (lim != null) {
             txt = "Daily limit: " + lim + " min. Used today: "
                     + Prefs.duration(Math.min(Prefs.getUsage(this, pkg), lim * Rules.MIN)) + ".";
+            if (Rules.splitOn(this)) {
+                long brk = Rules.breakUntil(this, pkg);
+                txt += "\n3 sessions of " + Prefs.duration(Rules.sessionLength(lim)) + " with a 1-hour break. "
+                        + (brk > 0 ? "On a break until "
+                        + android.text.format.DateFormat.getTimeFormat(this).format(new java.util.Date(brk)) + "."
+                        : "This session: " + Prefs.duration(Rules.sessionLeft(this, pkg, lim)) + " left.");
+            }
             if (Rules.planLocked(this)) {
                 txt += "\nLocked until " + Prefs.dateTime(this, Prefs.getLong(this, "plan_lock")) + ".";
             }

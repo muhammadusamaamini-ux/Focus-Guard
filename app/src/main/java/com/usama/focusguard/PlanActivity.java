@@ -47,6 +47,7 @@ public class PlanActivity extends Activity {
     private Button schedTo;
     private DayPicker schedDays;
 
+    private Switch splitSwitch;
     private LinearLayout limitsBox;
     private Button addBtn;
     private List<Apps.Item> appsCache;
@@ -89,6 +90,11 @@ public class PlanActivity extends Activity {
         addBtn = Ui.button(this, "+ Add an app timer", false);
         addBtn.setOnClickListener(v -> addApp());
         limCard.addView(addBtn, Ui.top(this, 10));
+        splitSwitch = toggle(limCard, "Split into 3 sessions with a 1-hour break", Rules.splitOn(this));
+        limCard.addView(Ui.text(this, "Example: a 60-minute timer gives 20 minutes at a time. After each "
+                + "20 minutes the app is blocked for 1 hour; after the third, until midnight.",
+                13, Ui.MUTED, false), Ui.top(this, 4));
+        Ui.enable(splitSwitch, !locked);
         col.addView(limCard, Ui.top(this, 12));
 
         // --- Bedtime ---
@@ -322,6 +328,7 @@ public class PlanActivity extends Activity {
     // ---------- save ----------
 
     private void writeAll() {
+        Prefs.putBool(this, "split_timers", splitSwitch.isChecked());
         Prefs.setLimits(this, limits);
         Prefs.setSleep(this, sleepOn, sleepStart, sleepEnd);
         Prefs.setSleepDays(this, sleepDays.getDays());

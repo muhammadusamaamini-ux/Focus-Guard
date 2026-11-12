@@ -116,6 +116,28 @@ public class BlockActivity extends Activity {
             timer.setText("");
             return;
         }
+        if ("break".equals(reason)) {
+            Integer lim = pkg == null ? null : Prefs.getLimits(this).get(pkg);
+            long until = pkg == null ? 0L : Rules.breakUntil(this, pkg);
+            String name = pkg == null ? "This app" : Apps.label(this, pkg);
+            icon.setText("☕");
+            if (until > 0L) {
+                long used = pkg == null ? 0L : Prefs.getUsage(this, pkg);
+                long left = lim == null ? 0L : Math.max(0L, lim * Rules.MIN - used);
+                title.setText("Session over");
+                message.setText(name + " is on a 1-hour break.\nIt opens again at "
+                        + android.text.format.DateFormat.getTimeFormat(this).format(new java.util.Date(until))
+                        + (lim == null ? "" : " for up to " + Prefs.duration(Math.min(left, Rules.sessionLength(lim))))
+                        + ".\nTime left:");
+                timer.setText(Prefs.format(until - now));
+            } else {
+                title.setText("Break is over");
+                message.setText(name + " can be used again.");
+                timer.setText("");
+                homeBtn.setText("Done");
+            }
+            return;
+        }
         if ("guard".equals(reason)) {
             icon.setText("🔒");
             title.setText("Locked for now");

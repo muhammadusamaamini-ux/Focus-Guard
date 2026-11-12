@@ -105,6 +105,39 @@ public final class Rules {
         return planLocked(c) ? Prefs.getLimits(c) : new java.util.TreeMap<>();
     }
 
+    // ---------- split timers: 3 sessions a day, 1-hour break after each ----------
+
+    public static final int SESSIONS = 3;
+    public static final long SESSION_BREAK = 60 * MIN;
+
+    public static boolean splitOn(Context c) { return Prefs.sp(c).getBoolean("split_timers", true); }
+
+    /** e.g. a 60-minute timer gives 20-minute sessions. */
+    public static long sessionLength(int limitMin) { return limitMin * MIN / SESSIONS; }
+
+    /** When the app's 1-hour break ends, or 0 if it isn't on a break. */
+    public static long breakUntil(Context c, String pkg) {
+        if (!splitOn(c) || !planLocked(c)) return 0L;
+        long until = Prefs.getLong(c, "cool_" + pkg);
+        return until > System.currentTimeMillis() ? until : 0L;
+    }
+
+    /** Counts session time. Returns true when this session has just run out (break starts). */
+    public static boolean countSession(Context c, String pkg, long delta, int limitMin) {
+        if (!splitOn(c)) return false;
+        long chunk = Prefs.addChunk(c, pkg, delta);
+        if (chunk >= sessionLength(limitMin)) {
+            Prefs.putLong(c, "cool_" + pkg, System.currentTimeMillis() + SESSION_BREAK);
+            Prefs.resetChunk(c, pkg);
+            return true;
+        }
+        return false;
+    }
+
+    public static long sessionLeft(Context c, String pkg, int limitMin) {
+        return Math.max(0L, sessionLength(limitMin) - Prefs.getChunk(c, pkg));
+    }
+
     public static long sleepEndsAt(Context c) { return nextAt(Prefs.sleepEnd(c)); }
 
     /** FOCUS, SLEEP, or null when nothing is blocking right now. */

@@ -142,9 +142,13 @@ public class BlockerService extends AccessibilityService {
             String pkg = activePackage();
             if (pkg != null) {
                 Integer lim = Rules.activeLimits(this).get(pkg);
-                if (lim != null && delta > 0) {
+                if (lim != null && delta > 0 && Rules.breakUntil(this, pkg) == 0L) {
                     long used = Prefs.addUsage(this, pkg, delta);
                     warnIfNearLimit(pkg, used, lim);
+                    if (used < lim * Rules.MIN) {
+                        Rules.countSession(this, pkg, delta, lim);
+                        warnIfSessionEnding(pkg, lim);
+                    }
                 }
                 evaluate(pkg);
             }
@@ -185,6 +189,18 @@ public class BlockerService extends AccessibilityService {
         }
     }
 
+    private final Set<String> sessionWarned = new HashSet<>();
+
+    private void warnIfSessionEnding(String pkg, int limitMin) {
+        if (!Rules.splitOn(this)) return;
+        long left = Rules.sessionLeft(this, pkg, limitMin);
+        String key = pkg + "@" + Prefs.getLong(this, "cool_" + pkg);
+        if (left > 0 && left <= Rules.MIN && sessionWarned.add(key)) {
+            Toast.makeText(this, "⏳ " + Apps.label(this, pkg) + ": 1 minute left in this session",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void evaluate(String pkg) {
         if (pkg == null || pkg.equals(getPackageName())) return;
 
@@ -199,6 +215,11 @@ public class BlockerService extends AccessibilityService {
         Integer lim = Rules.activeLimits(this).get(pkg);
         if (lim != null && Prefs.getUsage(this, pkg) >= lim * Rules.MIN) {
             block("limit", pkg, false);
+            return;
+        }
+        // 2b. Split timers: 1-hour break after each session.
+        if (lim != null && Rules.breakUntil(this, pkg) > 0L) {
+            block("break", pkg, false);
             return;
         }
 

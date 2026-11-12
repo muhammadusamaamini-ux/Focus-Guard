@@ -291,7 +291,7 @@ public class MainActivity extends Activity {
                 if (Prefs.getUsage(this, e.getKey()) >= e.getValue() * Rules.MIN) up++;
             }
             timersSub = limits.size() + (limits.size() == 1 ? " app timer" : " app timers")
-                    + (!locked ? " · paused" : up > 0 ? " · " + up + " used up today" : "");
+                    + (!locked ? " · paused" : up > 0 ? " · " + up + " used up today" : "") + (Rules.splitOn(this) ? " · 3 sessions" : "");
         }
         ways.addView(Ui.listRow(this, "⏳", "App timers", timersSub, v -> openPlan("timers")));
         ways.addView(Ui.divider(this));

@@ -167,6 +167,24 @@ public final class Prefs {
         return u.getLong(pkg, 0L);
     }
 
+    /** Time used in the current session of a split timer (resets after each 1-hour break and at midnight). */
+    public static long getChunk(Context c, String pkg) {
+        SharedPreferences u = usage(c);
+        if (!today().equals(u.getString("_day", ""))) return 0L;
+        return u.getLong("c|" + pkg, 0L);
+    }
+
+    /** Call after addUsage (which starts a new day when needed). */
+    public static long addChunk(Context c, String pkg, long ms) {
+        long cur = getChunk(c, pkg) + ms;
+        usage(c).edit().putLong("c|" + pkg, cur).apply();
+        return cur;
+    }
+
+    public static void resetChunk(Context c, String pkg) {
+        usage(c).edit().putLong("c|" + pkg, 0L).apply();
+    }
+
     public static long addUsage(Context c, String pkg, long ms) {
         SharedPreferences u = usage(c);
         String t = today();
