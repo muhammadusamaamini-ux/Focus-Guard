@@ -39,7 +39,11 @@ public final class Notifier {
                 .setShowWhen(false)
                 .setContentIntent(openApp(c));
 
-        if (Rules.emergencyOn(c)) {
+        if (Bank.active(c)) {
+            b.setContentTitle("🏦 Banking mode")
+                    .setContentText("The blocker is paused while you use " + Bank.label(c)
+                            + ". It turns back on by itself when you leave.");
+        } else if (Rules.emergencyOn(c)) {
             b.setContentTitle("Emergency time")
                     .setContentText("Blocking comes back on automatically.");
             countdown(b, Prefs.getLong(c, "em_until"));
@@ -84,7 +88,40 @@ public final class Notifier {
         }
     }
 
+    /** "A new version is available", with what's new in it. Tapping opens the update screen. */
+    public static void updateAvailable(Context c, int build, String notes) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        String ch = CHANNEL;
+        if (Build.VERSION.SDK_INT >= 26) {
+            ch = "updates";
+            if (nm.getNotificationChannel(ch) == null) {
+                nm.createNotificationChannel(new NotificationChannel(ch, "App updates",
+                        NotificationManager.IMPORTANCE_DEFAULT));
+            }
+        }
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, ch)
+                : new Notification.Builder(c);
+        String text = notes == null || notes.isEmpty() ? "Tap to update." : notes;
+        Intent i = new Intent(c, MainActivity.class).putExtra("check_update", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Notification n = b.setSmallIcon(R.drawable.ic_tile)
+                .setColor(Color.parseColor(Ui.DARK))
+                .setContentTitle("Focus Guard update available (build " + build + ")")
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText("What's new:\n" + text))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(c, 5, i,
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                .build();
+        try {
+            nm.notify(3, n);
+        } catch (SecurityException ignored) {
+        }
+    }
+
     private static String signature(Context c) {
+        if (Bank.active(c)) return "bank" + Bank.activeApp(c);
         if (Rules.emergencyOn(c)) return "em" + Prefs.getLong(c, "em_until");
         if (Rules.focusActive(c)) return "focus" + Rules.focusEndsAt(c);
         if (Rules.sleepNow(c)) return "sleep" + Rules.sleepEndsAt(c);

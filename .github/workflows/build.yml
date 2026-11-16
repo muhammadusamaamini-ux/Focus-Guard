@@ -34,6 +34,9 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Focus Guard (build ${{ github.run_number }})
-          body: Download FocusGuard.apk below and open it on your phone to install.
+          body: |
+            ${{ github.event.head_commit.message }}
+
+            Download FocusGuard.apk below and open it on your phone to install.
           files: FocusGuard.apk
           make_latest: true

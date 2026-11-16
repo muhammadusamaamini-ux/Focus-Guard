@@ -102,6 +102,8 @@ public class BlockerService extends AccessibilityService {
         lastTickAt = SystemClock.elapsedRealtime();
         handler.removeCallbacks(tick);
         handler.post(tick);
+        // Back on after banking mode (or switched on by hand): banking mode is over.
+        if (Bank.active(this)) Bank.resume(this);
         Notifier.update(this, true);
     }
 
@@ -155,6 +157,7 @@ public class BlockerService extends AccessibilityService {
         }
 
         Notifier.update(this);
+        Updater.backgroundCheck(this);
         Gray.apply(this, onScreen);
         Dnd.apply(this);
         if (Rules.weekOver(this)) {
@@ -203,6 +206,12 @@ public class BlockerService extends AccessibilityService {
 
     private void evaluate(String pkg) {
         if (pkg == null || pkg.equals(getPackageName())) return;
+
+        // 0. Banking apps: step aside so they can run (they refuse while Accessibility is on).
+        if (Bank.apps(this).contains(pkg)) {
+            Bank.openedDirectly(this, pkg);
+            return;
+        }
 
         // 1. Protect Focus Guard itself while anything is locked.
         if (SETTINGS.contains(pkg) || INSTALLERS.contains(pkg)) {

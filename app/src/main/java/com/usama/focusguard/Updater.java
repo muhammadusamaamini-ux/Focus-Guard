@@ -38,6 +38,42 @@ public final class Updater {
         }
     }
 
+    /** Checks GitHub quietly every 6 hours and shows a notification with what's new. */
+    public static void backgroundCheck(Context c) {
+        long now = System.currentTimeMillis();
+        if (now - Prefs.getLong(c, "upd_checked") < 6L * 60L * Rules.MIN) return;
+        Prefs.putLong(c, "upd_checked", now);
+        final Context app = c.getApplicationContext();
+        new Thread(() -> {
+            try {
+                HttpURLConnection con = open(LATEST);
+                con.setRequestProperty("Accept", "application/vnd.github+json");
+                if (con.getResponseCode() != 200) return;
+                JSONObject j = new JSONObject(readAll(con.getInputStream()));
+                int latest = buildNumber(j.optString("tag_name"));
+                if (latest > installedBuild(app) && Prefs.getLong(app, "upd_notified") != latest) {
+                    Prefs.putLong(app, "upd_notified", latest);
+                    Notifier.updateAvailable(app, latest, notes(j.optString("body")));
+                }
+            } catch (Exception ignored) {
+            }
+        }).start();
+    }
+
+    /** Release text without the technical lines. */
+    static String notes(String body) {
+        if (body == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String line : body.split("\n")) {
+            String t = line.trim();
+            if (t.isEmpty() || t.startsWith("Co-Authored-By") || t.startsWith("Claude-Session")
+                    || t.startsWith("Download FocusGuard")) continue;
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(t);
+        }
+        return sb.toString();
+    }
+
     public static void check(Activity a) {
         AlertDialog wait = new AlertDialog.Builder(a)
                 .setMessage("Checking for updates…").setCancelable(false).show();

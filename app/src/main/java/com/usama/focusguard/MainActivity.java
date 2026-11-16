@@ -168,6 +168,7 @@ public class MainActivity extends Activity {
         root.addView(buildNav());
         setContentView(root);
         openTab(Prefs.sp(this).getInt("tab", HOME));
+        handleUpdateIntent(getIntent());
     }
 
     private LinearLayout col(int i) { return (LinearLayout) tabs[i].getChildAt(0); }
@@ -325,6 +326,13 @@ public class MainActivity extends Activity {
 
         // Reduce interruptions
         homeRows.addView(Ui.section(this, "Reduce interruptions"), Ui.top(this, 22));
+        LinearLayout bankRow = Ui.listCard(this);
+        int nb = Bank.apps(this).size();
+        bankRow.addView(Ui.listRow(this, "🏦", "Banking apps",
+                Bank.active(this) ? "Banking mode on · blocker paused"
+                        : nb == 0 ? "Let banking apps run with the blocker on"
+                        : nb + (nb == 1 ? " banking app" : " banking apps"), v -> openTab(SETTINGS)));
+        homeRows.addView(bankRow, Ui.top(this, 8));
         LinearLayout red = Ui.listCard(this);
         red.addView(Ui.listRow(this, "🔔", "Manage notifications", "Choose which apps can notify you",
                 v -> openSystem("android.settings.ALL_APPS_NOTIFICATION_SETTINGS")));
@@ -930,7 +938,7 @@ public class MainActivity extends Activity {
 
         if (!Gray.canControl(this)) {
             LinearLayout gray = Ui.card(this, Ui.WARN);
-            gray.addView(Ui.text(this, "One-time setup for grayscale", 16, Ui.INK, true));
+            gray.addView(Ui.text(this, "One-time setup for grayscale and banking apps", 16, Ui.INK, true));
             gray.addView(Ui.text(this, "Android only lets an app turn the screen gray after you allow it once "
                     + "from a computer, using this command:", 14, Ui.INK, false), Ui.top(this, 6));
             TextView cmd = Ui.text(this, Gray.GRANT_COMMAND, 13, Ui.INK, false);
@@ -949,11 +957,93 @@ public class MainActivity extends Activity {
             settingsBody.addView(gray, Ui.top(this, 12));
         }
 
+        buildBankSection();
+
         settingsBody.addView(Ui.section(this, "App"), Ui.top(this, 22));
         LinearLayout app = Ui.listCard(this);
         app.addView(Ui.listRow(this, "⬇️", "Check for updates",
                 "Installed: build " + Updater.installedBuild(this), v -> Updater.check(this)));
         settingsBody.addView(app, Ui.top(this, 8));
+    }
+
+    // ---------- banking apps ----------
+
+    private void buildBankSection() {
+        settingsBody.addView(Ui.section(this, "Banking apps"), Ui.top(this, 22));
+        LinearLayout card = Ui.listCard(this);
+        TextView info = Ui.text(this, "Banking apps won't open while the blocker is on. Add yours here: when you "
+                + "open one, Focus Guard switches the blocker off and turns it back on by itself as soon as "
+                + "you leave the banking app."
+                + (Bank.canSwitch(this) ? "" : "\n\nThis needs the one-time computer setup shown above."),
+                13, Ui.MUTED, false);
+        info.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 6));
+        card.addView(info);
+        for (String pkg : Bank.apps(this)) {
+            card.addView(Ui.divider(this));
+            LinearLayout row = Ui.listRow(this, "🏦", Apps.label(this, pkg), "Opens with the blocker paused", null);
+            Button open = Ui.chip(this, "Open");
+            Ui.setChip(this, open, true);
+            open.setOnClickListener(v -> Bank.open(this, pkg, null));
+            Button home = Ui.chip(this, "🏠");
+            home.setOnClickListener(v -> Bank.pinToHome(this, pkg));
+            Button del = Ui.chip(this, "✕");
+            del.setOnClickListener(v -> {
+                Bank.remove(this, pkg);
+                refreshSettings();
+            });
+            row.addView(open);
+            for (Button b : new Button[]{home, del}) {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.setMarginStart(Ui.dp(this, 6));
+                row.addView(b, lp);
+            }
+            card.addView(row);
+        }
+        card.addView(Ui.divider(this));
+        card.addView(Ui.listRow(this, "➕", "Add a banking app", null, v -> pickBankApp()));
+        settingsBody.addView(card, Ui.top(this, 8));
+    }
+
+    private void pickBankApp() {
+        Rules.toast(this, "Loading your apps…");
+        new Thread(() -> {
+            List<Apps.Item> all = Apps.load(this);
+            List<Apps.Item> ok = new ArrayList<>();
+            Set<String> have = Bank.apps(this);
+            for (Apps.Item it : all) {
+                if (!have.contains(it.pkg) && Bank.notAllowed(this, it.pkg) == null) ok.add(it);
+            }
+            runOnUiThread(() -> {
+                String[] names = new String[ok.size()];
+                for (int i = 0; i < names.length; i++) names[i] = ok.get(i).label;
+                new AlertDialog.Builder(this)
+                        .setTitle("Which is your banking app?")
+                        .setItems(names, (d, w) -> {
+                            Bank.add(this, ok.get(w).pkg);
+                            Rules.toast(this, ok.get(w).label + " added. Open it any way you like.");
+                            refreshSettings();
+                            refreshHomeRows();
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            });
+        }).start();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleUpdateIntent(intent);
+    }
+
+    private void handleUpdateIntent(Intent i) {
+        if (i != null && i.getBooleanExtra("check_update", false)) {
+            i.removeExtra("check_update");
+            openTab(SETTINGS);
+            Updater.check(this);
+        }
     }
 
     private void permRow(LinearLayout card, String title, String desc, boolean ok, Runnable action) {
@@ -979,6 +1069,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (Bank.active(this)) Bank.resume(this);
         if (needsNotifications() && !Prefs.getBool(this, "asked_notif")) {
             Prefs.putBool(this, "asked_notif", true);
             requestPermissions(new String[]{NOTIF_PERM}, 7);
